@@ -1,0 +1,33 @@
+FROM node:16-alpine3.11 as build-stage
+
+ARG GIT_PERSONAL_TOKEN
+ARG VUE_APP_BASE_URL
+
+WORKDIR /app
+RUN apk update &&  \
+    apk upgrade && \
+    apk add --no-cache git && \
+    git config --global url."https://${GIT_PERSONAL_TOKEN}:@github.com/".insteadOf "https://github.com/"
+# TODO: replace repository url of ui project
+RUN git clone https://github.com/InspectorIncognito/project-frontend-template.git && \
+    cp -r project-frontend-template/. . && \
+    rm -r project-frontend-template
+RUN npm install
+RUN touch '.env.production' && \
+  echo 'NODE_ENV=production' >> '.env.production' && \
+  echo "VITE_BASE_URL=${VUE_APP_BASE_URL}" >> '.env.production' && \
+  echo 'VITE_I18N_LOCALE=es' >> '.env.production' && \
+  echo 'VITE_I18N_FALLBACK_LOCALE=en' >> '.env.production' && \
+  echo 'VITE_I18N_SUPPORTED_LOCALE=en,es' >> '.env.production'
+RUN npm run build -- --mode production
+
+FROM nginx:1.17
+
+COPY --from=build-stage /app/dist /usr/share/nginx/html
+COPY ./docker/nginx/config/local.conf /etc/nginx/conf.d/local.conf
+COPY ./docker/nginx/config/status.conf /etc/nginx/conf.d/status.conf
+COPY ./docker/nginx/nginx_entrypoint.sh ./entrypoint.sh
+
+RUN rm /etc/nginx/conf.d/default.conf
+
+ENTRYPOINT ["/bin/bash", "entrypoint.sh"]

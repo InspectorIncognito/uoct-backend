@@ -1,0 +1,21 @@
+# you can create a key here: https://miniwebtool.com/es/django-secret-key-generator/
+SECRET_KEY=qchgy#plv0ja(-#3+qe@w$)krnwrlviw2mb4w7=77le@j3)j%!
+
+DEBUG=False
+
+ALLOWED_HOSTS=127.0.0.1,localhost
+
+# Postgres parameters
+DB_NAME=dbtemp
+DB_USER=user
+DB_PASS=pass
+DB_HOST=db
+DB_PORT=5432
+
+# needed in dev mode
+CORS_ALLOWED_ORIGINS=127.0.0.1,localhost
+
+# Redis parameters
+REDIS_HOST=cache
+REDIS_PORT=6379
+REDIS_DB=0

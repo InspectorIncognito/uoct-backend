@@ -1,0 +1,83 @@
+version: '3.7'
+
+services:
+  nginx:
+    build:
+      context: ..
+      dockerfile: docker/nginx/NginxDockerfile
+      args:
+        - GIT_PERSONAL_TOKEN=${GITHUB_TOKEN}
+        - VUE_APP_BASE_URL=${VUE_APP_BASE_URL}
+    expose:
+      - 80
+    volumes:
+      - static_volume_backend:/app/backend/static
+      - files_volume_backend:/app/backend/files
+    depends_on:
+      - web
+    networks:
+      - nginx_network
+
+  web:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile
+      target: prod
+    command: webserver-prod
+    volumes:
+      - static_volume_backend:/app/backend/static
+      - files_volume_backend:/app/backend/files
+    env_file:
+      - ./docker_env
+    depends_on:
+      - db
+      - cache
+    networks:
+      - nginx_network
+      - database_network
+      - cache_network
+
+  worker:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile
+    command: worker
+    volumes:
+      - static_volume_backend:/app/backend/static
+      - files_volume_backend:/app/backend/files
+    env_file:
+      - ./docker_env
+    depends_on:
+      - cache
+      - db
+    networks:
+      - database_network
+      - cache_network
+
+  cache:
+    image: redis:latest
+    networks:
+      - cache_network
+
+  db:
+    image: postgres:14.5-alpine3.16
+    volumes:
+      - postgres_backend:/var/lib/postgresql/data/
+    env_file:
+      - ./docker_db_env
+    networks:
+      - cache_network
+      - database_network
+
+networks:
+  nginx_network:
+    driver: bridge
+  database_network:
+    driver: bridge
+  cache_network:
+    driver: bridge
+
+volumes:
+  postgres_backend:
+  static_volume_backend:
+  files_volume_backend:

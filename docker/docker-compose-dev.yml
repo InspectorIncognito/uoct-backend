@@ -1,0 +1,19 @@
+version: '3.7'
+
+services:
+  nginx:
+    ports:
+      - "8080:80"
+  web:
+    build:
+      target: dev
+    command: webserver-dev
+    ports:
+      - "8081:8000"
+    volumes:
+      - ../backend:/app/backend
+    env_file:
+      - ./dev/backend_env
+  db:
+    ports:
+      - "5432:5432"
