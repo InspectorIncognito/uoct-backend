@@ -1,4 +1,4 @@
-django==4.1.1
+django==4.1.13
 django-rq==2.5.1
 rq==1.11.0
 python-decouple==3.6
