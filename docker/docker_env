@@ -1,7 +1,7 @@
 # you can create a key here: https://miniwebtool.com/es/django-secret-key-generator/
 SECRET_KEY=qchgy#plv0ja(-#3+qe@w$)krnwrlviw2mb4w7=77le@j3)j%!
 
-DEBUG=False
+DEBUG=True
 
 ALLOWED_HOSTS=127.0.0.1,localhost
 

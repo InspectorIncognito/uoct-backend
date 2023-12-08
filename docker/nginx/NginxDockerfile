@@ -9,9 +9,9 @@ RUN apk update &&  \
     apk add --no-cache git && \
     git config --global url."https://${GIT_PERSONAL_TOKEN}:@github.com/".insteadOf "https://github.com/"
 # TODO: replace repository url of ui project
-RUN git clone https://github.com/InspectorIncognito/project-frontend-template.git && \
-    cp -r project-frontend-template/. . && \
-    rm -r project-frontend-template
+RUN git clone https://github.com/InspectorIncognito/uoct-frontend.git && \
+    cp -r uoct-frontend/. . && \
+    rm -r uoct-frontend
 RUN npm install
 RUN touch '.env.production' && \
   echo 'NODE_ENV=production' >> '.env.production' && \
