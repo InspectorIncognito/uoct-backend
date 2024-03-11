@@ -18,6 +18,7 @@ RUN /bin/sh -c 'pip3 install --no-cache-dir --upgrade pip'
 RUN /bin/sh -c 'pip3 install --no-cache-dir -r /install/requirements-dev.txt'
 WORKDIR /app
 COPY ./docker/entrypoint.sh ./docker/entrypoint.sh
+COPY ./backend ./backend
 EXPOSE 8000
 ENTRYPOINT ["/bin/sh", "docker/entrypoint.sh"]
 

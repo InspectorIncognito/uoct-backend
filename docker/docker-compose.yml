@@ -1,7 +1,26 @@
 version: '3.7'
 
 services:
+  test:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile
+      target: dev
+    command: test
+    profiles: [ 'test' ]
+    volumes:
+      - ../backend/static:/app/static
+      - ../backend/media:/app/media
+    env_file:
+      - ./docker_env
+    depends_on:
+      - db
+      - cache
+    networks:
+      - database_network
+      - cache_network
   nginx:
+    profiles: ['prod']
     build:
       context: ..
       dockerfile: docker/nginx/NginxDockerfile
@@ -19,6 +38,7 @@ services:
       - nginx_network
 
   web:
+    profiles: ['prod']
     build:
       context: ..
       dockerfile: docker/Dockerfile
@@ -38,6 +58,7 @@ services:
       - cache_network
 
   worker:
+    profiles: ['prod']
     build:
       context: ..
       dockerfile: docker/Dockerfile
@@ -55,11 +76,13 @@ services:
       - cache_network
 
   cache:
+    profiles: ['dev', 'prod', 'test']
     image: redis:latest
     networks:
       - cache_network
 
   db:
+    profiles: ['dev', 'prod', 'test']
     image: postgres:14.5-alpine3.16
     volumes:
       - postgres_backend:/var/lib/postgresql/data/

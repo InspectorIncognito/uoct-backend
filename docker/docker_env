@@ -13,7 +13,7 @@ DB_HOST=db
 DB_PORT=5432
 
 # needed in dev mode
-CORS_ALLOWED_ORIGINS=127.0.0.1,localhost
+CORS_ALLOWED_ORIGINS=https://127.0.0.1,https://localhost
 
 # Redis parameters
 REDIS_HOST=cache

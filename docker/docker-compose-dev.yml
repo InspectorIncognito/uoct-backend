@@ -2,9 +2,11 @@ version: '3.7'
 
 services:
   nginx:
+    profiles: ['dev']
     ports:
       - "8080:80"
   web:
+    profiles: ['dev', 'test']
     build:
       target: dev
     command: webserver-dev
@@ -15,5 +17,6 @@ services:
     env_file:
       - ./dev/backend_env
   db:
+    profiles: ['dev', 'test']
     ports:
       - "5432:5432"

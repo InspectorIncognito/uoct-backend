@@ -41,4 +41,8 @@ worker)
   # TODO: if you define a new queue, you must add it as a new param in this command call
   python ./backend/manage.py rqworker default email_sender
   ;;
+test)
+  echo "Running tests"
+  python /app/backend/manage.py test backend
+  ;;
 esac
