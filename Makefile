@@ -1,13 +1,13 @@
 # Windows
 ifeq ($(OS),Window_NT)
-	TEST = docker compose -p emov-backend-test -f docker\docker-compose.yml
-	COMPOSE_DEV = docker compose -p uoct-backend-dev -f docker\docker-compose.yml -f docker\docker-compose-dev.yml
-	COMPOSE_PROD = docker compose -p uoct-backend-prod -f docker\docker-compose.yml
+	TEST = docker compose -p uoct-backend-test -f docker\docker-compose.yml
+	COMPOSE_DEV = docker compose -p uoct-backend-dev -f docker\docker-compose.yml -f docker\docker-compose-dev.yml --env-file .env.frontend
+	COMPOSE_PROD = docker compose -p uoct-backend-prod -f docker\docker-compose.yml --env-file .env.frontend
 # Linux
 else
-	TEST = docker compose -p emov-backend-test -f docker/docker-compose.yml
-	COMPOSE_DEV = docker compose -p uoct-backend-dev -f docker/docker-compose.yml -f docker/docker-compose-dev.yml
-	COMPOSE_PROD = docker compose -p uoct-backend-prod -f docker/docker-compose.yml
+	TEST = docker compose -p uoct-backend-test -f docker/docker-compose.yml
+	COMPOSE_DEV = docker compose -p uoct-backend-dev -f docker/docker-compose.yml -f docker/docker-compose-dev.yml --env-file .env.frontend
+	COMPOSE_PROD = docker compose -p uoct-backend-prod -f docker/docker-compose.yml --env-file .env.frontend
 endif
 
 test:
