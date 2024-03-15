@@ -50,7 +50,8 @@ if DEBUG:
 
 LOCAL_APPS = [
     'user',
-    'rest_api'
+    'rest_api',
+    'gps'
 ]
 
 INSTALLED_APPS = DJANGO_APPS + THIRD_PARTY_APPS + LOCAL_APPS

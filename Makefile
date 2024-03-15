@@ -3,12 +3,18 @@ ifeq ($(OS),Window_NT)
 	TEST = docker compose -p uoct-backend-test -f docker\docker-compose.yml
 	COMPOSE_DEV = docker compose -p uoct-backend-dev -f docker\docker-compose.yml -f docker\docker-compose-dev.yml --env-file .env.frontend
 	COMPOSE_PROD = docker compose -p uoct-backend-prod -f docker\docker-compose.yml --env-file .env.frontend
+	MANAGE = python backend\manage.py
 # Linux
 else
 	TEST = docker compose -p uoct-backend-test -f docker/docker-compose.yml
 	COMPOSE_DEV = docker compose -p uoct-backend-dev -f docker/docker-compose.yml -f docker/docker-compose-dev.yml --env-file .env.frontend
 	COMPOSE_PROD = docker compose -p uoct-backend-prod -f docker/docker-compose.yml --env-file .env.frontend
+	MANAGE = python backend/manage.py
 endif
+
+migrate:
+	$(MANAGE) makemigrations
+	$(MANAGE) migrate
 
 test:
 	$(TEST) --profile test build
@@ -17,3 +23,7 @@ test:
 dev_up:
 	$(COMPOSE_DEV) --profile dev build
 	$(COMPOSE_DEV) --profile dev up
+
+prod_up:
+	@$(COMPOSE_PROD) --profile prod build
+	@$(COMPOSE_PROD) --profile prod up -d

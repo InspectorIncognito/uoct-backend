@@ -6,7 +6,7 @@ DEBUG=True
 ALLOWED_HOSTS=127.0.0.1,localhost
 
 # Postgres parameters
-DB_NAME=dbtest
+DB_NAME=dbtemp
 DB_USER=user
 DB_PASS=pass
 DB_HOST=db

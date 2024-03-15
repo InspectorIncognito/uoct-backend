@@ -1,5 +1,17 @@
 version: '3.7'
 
+x-prod-server:
+  &prod-server
+  build:
+    context: ..
+    dockerfile: docker/Dockerfile
+    target: prod
+  env_file:
+    - ./docker_env
+  volumes:
+    - static_volume_backend:/app/backend/static
+    - files_volume_backend:/app/backend/files
+
 services:
   test:
     build:
@@ -11,6 +23,8 @@ services:
     volumes:
       - ../backend/static:/app/static
       - ../backend/media:/app/media
+    environment:
+      - DEBUG=True
     env_file:
       - ./docker_env
     depends_on:
@@ -19,6 +33,7 @@ services:
     networks:
       - database_network
       - cache_network
+
   nginx:
     profiles: ['prod']
     build:
@@ -29,6 +44,8 @@ services:
         - VUE_APP_BASE_URL=${VUE_APP_BASE_URL}
     expose:
       - 80
+    ports:
+      - "80:80"
     volumes:
       - static_volume_backend:/app/backend/static
       - files_volume_backend:/app/backend/files
@@ -38,15 +55,9 @@ services:
       - nginx_network
 
   web:
+    <<: *prod-server
     profiles: ['prod']
-    build:
-      context: ..
-      dockerfile: docker/Dockerfile
-      target: prod
     command: webserver-prod
-    volumes:
-      - static_volume_backend:/app/backend/static
-      - files_volume_backend:/app/backend/files
     env_file:
       - ./docker_env
     depends_on:
@@ -58,10 +69,8 @@ services:
       - cache_network
 
   worker:
+    <<: *prod-server
     profiles: ['prod']
-    build:
-      context: ..
-      dockerfile: docker/Dockerfile
     command: worker
     volumes:
       - static_volume_backend:/app/backend/static

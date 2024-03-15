@@ -1,4 +1,4 @@
 # for postgres container
-POSTGRES_DB=dbtest
+POSTGRES_DB=dbtemp
 POSTGRES_USER=user
 POSTGRES_PASSWORD=pass
