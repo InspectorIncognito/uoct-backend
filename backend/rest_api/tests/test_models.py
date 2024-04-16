@@ -1,4 +1,4 @@
-import json
+from rest_api.util.shape import flush_shape_objects
 
 from rest_api.tests.tests_views_base import BaseTestCase
 from rest_api.models import Shape, Segment
@@ -60,6 +60,14 @@ class ShapeTest(GeometryTestCase):
         actual = shape.to_geojson()
         expected = {}
         self.assertDictEqual(actual, expected)
+
+    def test_flush_shape_objects(self):
+        _, _ = self.create_segments()
+        self.assertTrue(len(Shape.objects.all()) == 1)
+        self.assertTrue(len(Segment.objects.all()) == len(self.segment_data))
+        flush_shape_objects()
+        self.assertTrue(len(Shape.objects.all()) == 0)
+        self.assertTrue(len(Segment.objects.all()) == 0)
 
 
 class SegmentTest(GeometryTestCase):
