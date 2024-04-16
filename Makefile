@@ -20,13 +20,17 @@ test:
 	$(TEST) build
 	$(TEST) up --abort-on-container-exit
 
-dev_up:
+build:
 	$(COMPOSE_DEV) build
+
+up:
 	$(COMPOSE_DEV) up
 
-dev_down:
+down:
 	$(COMPOSE_DEV) down
 
+db:
+	$(COMPOSE_DEV) up db
 prod_up:
 	@$(COMPOSE_PROD) build
 	@$(COMPOSE_PROD) up -d

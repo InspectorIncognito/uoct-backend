@@ -1,7 +1,8 @@
 import json
-
 from django.contrib.auth import get_user_model
+from rest_framework import status
 from rest_framework.test import APITestCase, APIClient
+from rest_framework.reverse import reverse
 
 
 class BaseTestCase(APITestCase):
@@ -17,7 +18,7 @@ class BaseTestCase(APITestCase):
     def setUp(self):
         self.client = APIClient()
 
-    def _make_request(self, client, method, url, data, status_code, json_process=False, **additional_method_params):
+    def _make_request(self, client, method, url, data=None, status_code=status.HTTP_200_OK, json_process=False, **additional_method_params):
         method_obj = None
         if method == self.GET_REQUEST:
             method_obj = client.get
@@ -45,3 +46,10 @@ class BaseTestCase(APITestCase):
             "password": password
         }
         return get_user_model().objects.create_user(**user_user_attributes)
+
+    def login_process(self):
+        user_credentials = {"username": "TestUser", "password": "TestPassword"}
+        self.create_user(**user_credentials)
+        login_response = self._make_request(self.client, self.POST_REQUEST, reverse('login'), data=user_credentials)
+        login_token = json.loads(login_response.content.decode('utf-8'))['token']
+        self.client.credentials(HTTP_AUTHORIZATION='Token {}'.format(login_token))
