@@ -1,9 +1,9 @@
-FROM python:3.9.13-alpine3.16 as base
+FROM python:3.11.0-alpine3.16 as base
 
 FROM base as builder
 
 RUN mkdir /install
-RUN /bin/sh -c 'apk update && apk add --no-cache gcc musl-dev geos-dev postgresql-dev'
+RUN /bin/sh -c 'apk update && apk add --no-cache gcc cmake make libtool musl-dev geos-dev postgresql-dev'
 COPY requirements-prod.txt /install/requirements-prod.txt
 RUN /bin/sh -c 'pip3 install --no-cache-dir --upgrade pip'
 RUN /bin/sh -c 'pip3 install --no-cache-dir --no-warn-script-location --prefix /install -r /install/requirements-prod.txt'

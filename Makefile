@@ -21,7 +21,7 @@ test:
 	$(TEST) up --abort-on-container-exit
 
 build:
-	$(COMPOSE_DEV) build
+	$(COMPOSE_DEV) build --no-cache
 
 up:
 	$(COMPOSE_DEV) up
