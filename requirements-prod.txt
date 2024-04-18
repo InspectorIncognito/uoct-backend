@@ -12,4 +12,3 @@ typer
 geojson
 overpass
 geopandas
-GDAL
