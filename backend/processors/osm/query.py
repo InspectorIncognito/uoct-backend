@@ -19,6 +19,3 @@ def overpass_query(query):
     api = overpass.API()
     response = api.get(query, verbosity='geom')
     return geojson.loads(geojson.dumps(response))
-
-
-data = overpass_query(ALAMEDA_QUERY)

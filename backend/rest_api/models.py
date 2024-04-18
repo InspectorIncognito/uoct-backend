@@ -8,7 +8,7 @@ class Shape(models.Model):
     name = models.CharField(max_length=128)
 
     def to_geojson(self):
-        segments = Segment.objects.filter(shape_id=self.pk).all()
+        segments = Segment.objects.filter(shape=self.pk).all()
         if len(segments) == 0:
             return {}
         geojson = [segment.to_geojson() for segment in segments]
@@ -19,18 +19,18 @@ class Shape(models.Model):
 
 
 class Segment(models.Model):
-    shape_id = models.ForeignKey(Shape, on_delete=models.CASCADE)
+    shape = models.ForeignKey(Shape, on_delete=models.CASCADE)
     sequence = models.IntegerField(blank=False, null=False)
     geometry = ArrayField(ArrayField(models.FloatField()), blank=False, null=False)
 
     def __str__(self):
-        return f"Segment {self.sequence} of Shape {self.shape_id}"
+        return f"Segment {self.sequence} of Shape {self.shape}"
 
     def to_geojson(self):
         feature = Feature(
             geometry=LineString(coordinates=self.geometry),
             properties={
-                "shape_id": self.shape_id.pk,
+                "shape_id": self.shape.pk,
                 "sequence": self.sequence
             }
         )
