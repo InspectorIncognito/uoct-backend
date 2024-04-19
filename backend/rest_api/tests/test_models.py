@@ -32,7 +32,7 @@ class GeometryTestCase(BaseTestCase):
         segment_data = segment_data or self.segment_data
         shape_obj = self.create_shape()
         for segment in segment_data:
-            segment['shape_id'] = shape_obj
+            segment['shape'] = shape_obj
         segments = Segment.objects.bulk_create([Segment(**segment) for segment in segment_data])
         return shape_obj, segments
 
@@ -94,7 +94,7 @@ class SegmentTest(GeometryTestCase):
         expected = [Feature(
             geometry=LineString(coordinates=segment.geometry),
             properties={
-                "shape_id": segment.shape_id.pk,
+                "shape_id": segment.shape.pk,
                 "sequence": segment.sequence
             }
         ) for segment in segments]

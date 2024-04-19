@@ -24,7 +24,6 @@ def clean_linestring(linestring):
         coords.append([float(point[0]), float(point[1])])
         previous_coords = point
     linestring = LineString(coordinates=coords)
-    print(linestring)
     return linestring
 
 

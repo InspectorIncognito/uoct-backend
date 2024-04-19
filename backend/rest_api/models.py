@@ -9,7 +9,6 @@ class Shape(models.Model):
 
     def to_geojson(self):
         segments = Segment.objects.filter(shape=self).all()
-        print(segments)
         if len(segments) == 0:
             return {}
         geojson = [segment.to_geojson() for segment in segments]

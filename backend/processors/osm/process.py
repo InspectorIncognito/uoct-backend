@@ -1,12 +1,10 @@
 import geopandas as gpd
 from typing import List
 from geojson.feature import Feature, FeatureCollection
-from shapely import Point
+from processors.geometry.point import Point as p
+from shapely.geometry import Point
 from shapely.ops import linemerge, split
-from geojson.geometry import LineString
 from shapely.geometry import LineString as shp_LineString
-import shapely as shp
-import json
 from rest_api.util.shape import flush_shape_objects
 from rest_api.models import Shape, Segment
 from processors.osm.query import overpass_query, ALAMEDA_QUERY
@@ -50,7 +48,7 @@ def merge_shape(gdf: gpd.GeoDataFrame) -> shp_LineString:
     return merged
 
 
-def segment_shape_by_distance(shape: shp_LineString, distance_threshold: float = 500):
+def segment_shape_by_distance(shape: shp_LineString, distance_threshold: float = 500, distance_algorithm: str = 'euclidean'):
     if distance_threshold <= 0:
         raise ValueError("distance_threshold must be greater than 0.")
     output_linestrings = []
@@ -67,7 +65,9 @@ def segment_shape_by_distance(shape: shp_LineString, distance_threshold: float =
                 previous_point = point_obj
                 counter += 1
                 continue
-            distance_accum += point_obj.distance(previous_point)
+            previous_p_aux = p(previous_point.x, previous_point.y)
+            actual_p_aux = p(point[0], point[1])
+            distance_accum += actual_p_aux.distance(previous_p_aux, algorithm=distance_algorithm)
             if distance_accum >= distance_threshold:
                 splitted = split(geom, point_obj).geoms
                 output_linestrings.append(splitted[0])
@@ -111,8 +111,9 @@ def process_shape_data(distance_threshold: float = 500):
     query_data = gpd.GeoDataFrame.from_features(overpass_query(ALAMEDA_QUERY))
     splitted_geojson = split_geojson_by_shape(query_data)
     segmented_shapes = []
-    for feature in splitted_geojson:
+    for idx, feature in enumerate(splitted_geojson):
         merged = merge_shape(feature)
-        segmented = segment_shape_by_distance(merged, distance_threshold)
+        segmented = segment_shape_by_distance(merged, distance_threshold, distance_algorithm='haversine')
         segmented_shapes.append(segmented)
+        print(idx, segmented)
     save_all_segmented_shapes_to_db(segmented_shapes)

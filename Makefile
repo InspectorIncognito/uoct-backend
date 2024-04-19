@@ -20,6 +20,9 @@ test:
 	$(TEST) build
 	$(TEST) up --abort-on-container-exit
 
+test_down:
+	$(TEST) down
+
 build:
 	$(COMPOSE_DEV) build
 

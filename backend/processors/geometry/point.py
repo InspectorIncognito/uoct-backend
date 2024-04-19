@@ -2,17 +2,28 @@ import math
 from processors.geometry.constants import EARTH_RADIUS_KM
 
 
+# Lon: x
+# Lat: y
 class Point:
-    def __init__(self, latitude: float, longitude: float):
-        self.latitude = latitude
-        self.longitude = longitude
+    def __init__(self, x, y):
+        self.x = x
+        self.y = y
+
+    def distance(self, other: "Point", algorithm: str = 'euclidean') -> float:
+        if algorithm == 'euclidean':
+            return self.euclidean_distance(other)
+        elif algorithm == 'haversine':
+            return self.haversine_distance(other)
+
+    def euclidean_distance(self, other: "Point") -> float:
+        return math.sqrt((other.x - self.x) ** 2 + (other.y - self.y) ** 2)
 
     def haversine_distance(self, other: "Point") -> float:
         if not isinstance(other, Point):
             raise ValueError("Other point must be of type Point")
 
-        lat1, lon1 = math.radians(self.latitude), math.radians(self.longitude)
-        lat2, lon2 = math.radians(other.latitude), math.radians(other.longitude)
+        lat1, lon1 = math.radians(self.y), math.radians(self.x)
+        lat2, lon2 = math.radians(other.y), math.radians(other.x)
 
         lon_dist, lat_dist = lon2 - lon1, lat2 - lat1
 
@@ -25,9 +36,6 @@ class Point:
 
         return distance
 
-    def distance(self, other: "Point") -> float:
-        return self.haversine_distance(other)
-
     def __eq__(self, point: "Point") -> bool:
         """
         Return True if the latitude and longitude of two Point objects are equal, False otherwise.
@@ -38,8 +46,8 @@ class Point:
         if not isinstance(point, Point):
             raise ValueError("Point must be a Point object.")
 
-        are_equal = (self.latitude == point.latitude and
-                     self.longitude == point.longitude)
+        are_equal = (self.y == point.y and
+                     self.x == point.x)
 
         return are_equal
 
@@ -50,7 +58,7 @@ class Point:
         :return: A representation of the point instance as a hash
         :rtype: int
         """
-        return hash((self.latitude, self.longitude))
+        return hash((self.y, self.x))
 
     def __str__(self) -> str:
         """
@@ -59,4 +67,4 @@ class Point:
         :return: A string representation of the point
         :rtype: str
         """
-        return f"Point(latitude={str(self.latitude)}, longitude={str(self.longitude)})"
+        return f"Point(latitude={str(self.y)}, longitude={str(self.x)})"

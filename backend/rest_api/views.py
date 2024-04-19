@@ -1,13 +1,11 @@
-import json
-
-from django.shortcuts import render
 from rest_framework import viewsets
 from django.http import JsonResponse
 from rest_framework import generics
 from rest_framework.permissions import AllowAny
 from processors.models.shapes import shapes_to_geojson
-from rest_api.models import Shape
-from rest_api.serializers import ShapeSerializer
+from rest_api.models import Shape, Segment
+from rest_api.serializers import ShapeSerializer, SegmentSerializer
+
 
 # Create your views here.
 class GeoJSONViewSet(generics.GenericAPIView):
@@ -28,3 +26,9 @@ class ShapeViewSet(viewsets.ModelViewSet):
     serializer_class = ShapeSerializer
 
 
+class SegmentViewSet(viewsets.ModelViewSet):
+    permission_classes = [AllowAny]
+    serializer_class = SegmentSerializer
+
+    def get_queryset(self):
+        return Segment.objects.filter(shape__id=self.kwargs['shape_pk']).order_by('sequence')
