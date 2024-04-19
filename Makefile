@@ -1,14 +1,14 @@
 # Windows
 ifeq ($(OS),Window_NT)
-	TEST = docker compose -p uoct-backend-test -f docker\docker-compose.yml
-	COMPOSE_DEV = docker compose -p uoct-backend-dev -f docker\docker-compose.yml -f docker\docker-compose-dev.yml --env-file .env.frontend
-	COMPOSE_PROD = docker compose -p uoct-backend-prod -f docker\docker-compose.yml --env-file .env.frontend
+	TEST = docker compose -p uoct-backend-test -f docker\docker-compose.yml --profile test
+	COMPOSE_DEV = docker compose -p uoct-backend-dev -f docker\docker-compose.yml -f docker\docker-compose-dev.yml --env-file .env.frontend --profile dev
+	COMPOSE_PROD = docker compose -p uoct-backend-prod -f docker\docker-compose.yml --env-file .env.frontend --profile prod
 	MANAGE = python backend\manage.py
 # Linux
 else
-	TEST = docker compose -p uoct-backend-test -f docker/docker-compose.yml
-	COMPOSE_DEV = docker compose -p uoct-backend-dev -f docker/docker-compose.yml -f docker/docker-compose-dev.yml --env-file .env.frontend
-	COMPOSE_PROD = docker compose -p uoct-backend-prod -f docker/docker-compose.yml --env-file .env.frontend
+	TEST = docker compose -p uoct-backend-test -f docker/docker-compose.yml --profile test
+	COMPOSE_DEV = docker compose -p uoct-backend-dev -f docker/docker-compose.yml -f docker/docker-compose-dev.yml --env-file .env.frontend --profile dev
+	COMPOSE_PROD = docker compose -p uoct-backend-prod -f docker/docker-compose.yml --env-file .env.frontend --profile prod
 	MANAGE = python backend/manage.py
 endif
 
@@ -17,13 +17,23 @@ migrate:
 	$(MANAGE) migrate
 
 test:
-	$(TEST) --profile test build
-	$(TEST) --profile test up --abort-on-container-exit
+	$(TEST) build
+	$(TEST) up --abort-on-container-exit
 
-dev_up:
-	$(COMPOSE_DEV) --profile dev build
-	$(COMPOSE_DEV) --profile dev up
+test_down:
+	$(TEST) down
 
+build:
+	$(COMPOSE_DEV) build
+
+up:
+	$(COMPOSE_DEV) up
+
+down:
+	$(COMPOSE_DEV) down
+
+db:
+	$(COMPOSE_DEV) up db
 prod_up:
-	@$(COMPOSE_PROD) --profile prod build
-	@$(COMPOSE_PROD) --profile prod up -d
+	@$(COMPOSE_PROD) build
+	@$(COMPOSE_PROD) up -d
