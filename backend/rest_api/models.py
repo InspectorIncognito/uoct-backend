@@ -8,7 +8,8 @@ class Shape(models.Model):
     name = models.CharField(max_length=128)
 
     def to_geojson(self):
-        segments = Segment.objects.filter(shape=self.pk).all()
+        segments = Segment.objects.filter(shape=self).all()
+        print(segments)
         if len(segments) == 0:
             return {}
         geojson = [segment.to_geojson() for segment in segments]

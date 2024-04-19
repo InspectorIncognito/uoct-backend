@@ -3,7 +3,7 @@ import geopandas as gpd
 from geojson.feature import Feature, FeatureCollection
 from geojson.geometry import LineString
 from shapely.geometry import LineString as shp_LineString
-from processors.osm.process import split_geojson_by_shape, merge_shape, segment_shape_by_distance
+from processors.osm.process import split_geojson_by_shape, merge_shape, segment_shape_by_distance, process_shape_data
 import pandas as pd
 
 
@@ -69,11 +69,14 @@ class TestProcess(BaseTestCase):
         expected = gpd.GeoDataFrame(pd.concat(expected, ignore_index=True))
         self.assertTrue(actual.equals(expected))
 
+    def test_process_pipeline(self):
+        process_shape_data()
+
 
 class TestGeometryUtils(BaseTestCase):
     def setUp(self):
         super(TestGeometryUtils, self).setUp()
-        self.gdf = gdf = gpd.GeoDataFrame.from_features(
+        self.gdf = gpd.GeoDataFrame.from_features(
             FeatureCollection(
                 [
                     Feature(geometry=LineString([(0, 0), (0, 1), (0, 2)])),

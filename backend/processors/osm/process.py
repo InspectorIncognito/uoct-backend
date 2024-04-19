@@ -87,15 +87,16 @@ def segment_shape_by_distance(shape: shp_LineString, distance_threshold: float =
 
 
 def save_segmented_shape_to_db(segmented_shape: List[shp_LineString], shape_name: str):
-    # clears the db
     shape = Shape.objects.create(**{"name": shape_name})
+    print("Created shape", shape)
     for idx, segment in enumerate(segmented_shape):
         segment_data = {
             "shape": shape,
-            "segment": idx,
-            "geometry": segment.coords
+            "sequence": idx,
+            "geometry": list(segment.coords)
         }
-        Segment.objects.create(**segment_data)
+        segment = Segment.objects.create(**segment_data)
+        print("Created segment", segment)
 
 
 def save_all_segmented_shapes_to_db(segmented_shapes: List[List[shp_LineString]]):
@@ -107,7 +108,7 @@ def save_all_segmented_shapes_to_db(segmented_shapes: List[List[shp_LineString]]
 # Crea la consulta, separa los distintos shapes, los mergea y divide en segmentos de 'distance_threshold' metros."
 # Almacena toda la información en la db
 def process_shape_data(distance_threshold: float = 500):
-    query_data = gpd.GeoDataFrame.from_dict(overpass_query(ALAMEDA_QUERY))
+    query_data = gpd.GeoDataFrame.from_features(overpass_query(ALAMEDA_QUERY))
     splitted_geojson = split_geojson_by_shape(query_data)
     segmented_shapes = []
     for feature in splitted_geojson:
@@ -115,5 +116,3 @@ def process_shape_data(distance_threshold: float = 500):
         segmented = segment_shape_by_distance(merged, distance_threshold)
         segmented_shapes.append(segmented)
     save_all_segmented_shapes_to_db(segmented_shapes)
-
-
