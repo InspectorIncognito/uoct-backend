@@ -48,7 +48,8 @@ def merge_shape(gdf: gpd.GeoDataFrame) -> shp_LineString:
     return merged
 
 
-def segment_shape_by_distance(shape: shp_LineString, distance_threshold: float = 500, distance_algorithm: str = 'euclidean'):
+def segment_shape_by_distance(shape: shp_LineString, distance_threshold: float = 500,
+                              distance_algorithm: str = 'euclidean'):
     if distance_threshold <= 0:
         raise ValueError("distance_threshold must be greater than 0.")
     output_linestrings = []
@@ -89,13 +90,8 @@ def segment_shape_by_distance(shape: shp_LineString, distance_threshold: float =
 def save_segmented_shape_to_db(segmented_shape: List[shp_LineString], shape_name: str):
     shape = Shape.objects.create(**{"name": shape_name})
     print("Created shape", shape)
-    for idx, segment in enumerate(segmented_shape):
-        segment_data = {
-            "shape": shape,
-            "sequence": idx,
-            "geometry": list(segment.coords)
-        }
-        segment = Segment.objects.create(**segment_data)
+    for sequence, segment in enumerate(segmented_shape):
+        shape.add_segment(sequence=sequence, geometry=segment)
         print("Created segment", segment)
 
 
@@ -115,5 +111,4 @@ def process_shape_data(distance_threshold: float = 500):
         merged = merge_shape(feature)
         segmented = segment_shape_by_distance(merged, distance_threshold, distance_algorithm='haversine')
         segmented_shapes.append(segmented)
-        print(idx, segmented)
     save_all_segmented_shapes_to_db(segmented_shapes)
