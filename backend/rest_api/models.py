@@ -25,10 +25,10 @@ class Shape(models.Model):
             "geometry": points
         }
         for point in points:
-            self.grid_min_lat = min(self.grid_min_lat, point[0])
-            self.grid_max_lat = max(self.grid_max_lat, point[0])
-            self.grid_min_lon = min(self.grid_min_lon, point[1])
-            self.grid_max_lon = max(self.grid_max_lon, point[1])
+            self.grid_min_lat = min(self.grid_min_lat, point[1])
+            self.grid_max_lat = max(self.grid_max_lat, point[1])
+            self.grid_min_lon = min(self.grid_min_lon, point[0])
+            self.grid_max_lon = max(self.grid_max_lon, point[0])
 
         Segment.objects.create(**shape_data)
         self.save()
@@ -56,11 +56,34 @@ class Segment(models.Model):
         return f"Segment {self.sequence} of Shape {self.shape}"
 
     def to_geojson(self):
+        properties = {
+            "shape_id": self.shape.pk,
+            "sequence": self.sequence,
+        }
+        speed = Speed.objects.filter(segment=self).first()
+        if speed is not None:
+            properties["speed"] = speed.speed
+        services = Services.objects.filter(segment=self).first()
+        if services is not None:
+            properties["services"] = services.services
         feature = Feature(
             geometry=LineString(coordinates=self.geometry),
-            properties={
-                "shape_id": self.shape.pk,
-                "sequence": self.sequence
-            }
+            properties=properties
         )
         return feature
+
+
+class Speed(models.Model):
+    segment = models.ForeignKey(Segment, on_delete=models.CASCADE)
+    speed = models.FloatField(blank=False, null=False)
+
+
+class Services(models.Model):
+    segment = models.ForeignKey(Segment, on_delete=models.CASCADE)
+    services = ArrayField(models.CharField(max_length=124), blank=False, null=False)
+
+
+class GTFSShape(models.Model):
+    shape_id = models.CharField(max_length=124)
+    geometry = ArrayField(ArrayField(models.FloatField()), blank=False, null=False)
+    direction = models.IntegerField(blank=False, null=False)

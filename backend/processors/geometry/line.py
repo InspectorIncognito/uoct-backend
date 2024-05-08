@@ -1,6 +1,8 @@
 import math
 
 from processors.geometry.point import Point
+from shapely.geometry import LineString as shp_LineString
+from shapely.geometry import Point as shp_Point
 
 
 class Line:
@@ -25,7 +27,7 @@ class Line:
         self.point_b = point_b
 
         # Calculate the length of the line
-        self.length = self.point_a.distance(self.point_b)
+        self.length = self.point_a.distance(self.point_b, algorithm='haversine')
 
     @property
     def point_a(self) -> Point:
@@ -118,8 +120,22 @@ class Line:
         :rtype: tuple[float, float]
         """
         # Get distances of the triangle formed by the line and the point
-        distance_a = point.distance(self.point_a)
-        distance_b = point.distance(self.point_b)
+        line = shp_LineString(coordinates=[self.point_a.coordinates, self.point_b.coordinates])
+        point_obj = shp_Point(point.coordinates)
+        distance = line.project(point_obj)
+        pj = shp_Point(list(line.interpolate(distance).coords))
+
+        p_initial = shp_Point(line.coords[0])
+
+        start_to_projection = shp_LineString([p_initial, pj])
+        projection_to_line = shp_LineString([point, pj])
+
+        return projection_to_line.length, start_to_projection.length
+
+
+
+        distance_a = point.distance(self.point_a, algorithm='haversine')
+        distance_b = point.distance(self.point_b, algorithm='haversine')
         segment_length = self.length
 
         # Sort the distances to get the smallest one
@@ -197,7 +213,7 @@ class Line:
 
 class PolylineSegment(Line):
 
-    def __init__(self, point_a: Point, point_b: Point, prev_distance: float | int, sequence: int):
+    def __init__(self, point_a: Point, point_b: Point, prev_distance: float, sequence: int):
         """
         A Segment is a line with a previous distance and a sequence number.
 
@@ -225,7 +241,7 @@ class PolylineSegment(Line):
         self.sequence = sequence
 
     @property
-    def prev_distance(self) -> float | int:
+    def prev_distance(self) -> float:
         """
         Get the previous distance of the segment.
 
@@ -235,7 +251,7 @@ class PolylineSegment(Line):
         return self._prev_distance
 
     @prev_distance.setter
-    def prev_distance(self, value: float | int) -> None:
+    def prev_distance(self, value: float) -> None:
         """
         Set the previous distance of the segment and check for valid values.
 

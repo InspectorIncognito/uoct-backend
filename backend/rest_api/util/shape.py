@@ -1,6 +1,6 @@
 from rest_api.models import Shape, Segment
 from velocity.constants import DEG_PI, DEG_PI_HALF
-from typing import List
+from typing import Dict, List
 
 
 class ShapeManager:
@@ -20,8 +20,8 @@ class ShapeManager:
             bbox_max_lat = max(bbox_max_lat, bbox[3])
         return [bbox_min_lon, bbox_min_lat, bbox_max_lon, bbox_max_lat]
 
-    def get_segments(self) -> List[Segment]:
-        return [shape.get_segments() for shape in self.shapes]
+    def get_segments(self) -> Dict[int, List[Segment]]:
+        return {shape.pk: list(shape.get_segments()) for shape in self.shapes}
 
 
 def flush_shape_objects():

@@ -12,3 +12,4 @@ typer
 geojson
 overpass
 geopandas
+haversine

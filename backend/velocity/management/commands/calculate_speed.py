@@ -1,11 +1,23 @@
-from django.core.management.base import BaseCommand, CommandError
+import os
+import logging
+import datetime
+from django.core.management import BaseCommand, CommandError
 
 
 class Command(BaseCommand):
-    help = 'Calculate speed of every GridCell inside the GridManager and update it'
+    help = 'Calculate speed for all segments of each shape in a range of time.'
 
     def add_arguments(self, parser):
-        pass
+        parser.add_argument(
+            '--start_time',
+            help="Start time of the GPS pulses.",
+            type=datetime.datetime
+        )
+        parser.add_argument(
+            '--end_time',
+            help="End time of the GPS pulses.",
+            type=datetime.datetime
+        )
 
     def handle(self, *args, **options):
         pass
