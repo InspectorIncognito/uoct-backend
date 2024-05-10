@@ -18,6 +18,7 @@ from rest_api.util.segment import SegmentManager
 from rest_api.util.gtfs import flush_gtfs_shape_objects
 
 from velocity.constants import ENCODING, DELIMITER, QUOTECHAR
+from rest_api.util.gtfs import GTFSShape
 
 
 class GTFSReader:
@@ -103,7 +104,7 @@ class GTFSReader:
             raise TypeError("The path to the GTFS zip file must be a string.")
 
         if not valid_type:
-            raise BadZipFile(f"File {self.gtfs_data} is not a valid zip file.")
+            raise BadZipFile(f"File {self.gtfs_url} is not a valid zip file.")
 
         gtfs_zip = ZipFile(gtfs_data)
         return gtfs_zip
@@ -355,6 +356,13 @@ class TripsReader(GTFSReader):
         df = self.load_csv_file_as_pd(self.filename)
         return df
 
+    def get_route_direction(self, shape_id: str):
+        df = self.load_csv_file_as_pd(self.filename)
+        col = df[df['shape_id'] == shape_id]
+        if col.empty:
+            return None
+        return col.iloc[0]['direction_id']
+
 
 class GTFSManager:
     def __init__(self):
@@ -363,6 +371,10 @@ class GTFSManager:
 
     def get_shape_id_dict(self):
         return self.shape_reader.load_csv_as_pd()
+
+    def get_processed_df(self):
+        df = self.get_shape_id_dict()
+        return self.shape_reader.process_df(df)
 
     def get_shape_geojson(self):
         df = self.get_shape_id_dict()
@@ -377,4 +389,10 @@ class GTFSManager:
         flush_gtfs_shape_objects()
         for _, row in processed_df.iterrows():
             shape_id = row['shape_id']
-            direction = shape_id
+            geometry = row['coordinates']
+            direction = self.trips_reader.get_route_direction(shape_id)
+            if direction is None:
+                print(f"Shape {shape_id} has no direction.")
+                return
+            GTFSShape.objects.create(shape_id=shape_id, geometry=geometry, direction=direction)
+

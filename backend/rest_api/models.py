@@ -87,3 +87,13 @@ class GTFSShape(models.Model):
     shape_id = models.CharField(max_length=124)
     geometry = ArrayField(ArrayField(models.FloatField()), blank=False, null=False)
     direction = models.IntegerField(blank=False, null=False)
+
+    def to_geojson(self):
+        return Feature(
+            geometry=LineString(coordinates=self.geometry),
+            properties={
+                'shape_id': str(self.shape_id),
+                'direction': str(self.direction)
+            }
+        )
+
