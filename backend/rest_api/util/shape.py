@@ -1,6 +1,7 @@
 from rest_api.models import Shape, Segment
 from velocity.constants import DEG_PI, DEG_PI_HALF
 from typing import Dict, List
+from geojson import FeatureCollection
 
 
 class ShapeManager:
@@ -22,6 +23,13 @@ class ShapeManager:
 
     def get_segments(self) -> Dict[int, List[Segment]]:
         return {shape.pk: list(shape.get_segments()) for shape in self.shapes}
+
+    def to_geojson(self):
+        return FeatureCollection(
+            features=[
+                feature.to_geojson() for feature in self.shapes
+            ]
+        )
 
 
 def flush_shape_objects():

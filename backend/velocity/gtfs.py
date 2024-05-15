@@ -379,6 +379,7 @@ class GTFSManager:
     def get_shape_geojson(self):
         df = self.get_shape_id_dict()
         df = self.shape_reader.process_df(df)
+
         geojson = self.shape_reader.processed_df_to_geojson(df)
         return geojson
 
@@ -387,12 +388,13 @@ class GTFSManager:
 
     def save_gtfs_shapes_to_db(self, processed_df: pd.DataFrame):
         flush_gtfs_shape_objects()
+        print("processed df shape:", processed_df.shape)
         for _, row in processed_df.iterrows():
             shape_id = row['shape_id']
             geometry = row['coordinates']
             direction = self.trips_reader.get_route_direction(shape_id)
             if direction is None:
                 print(f"Shape {shape_id} has no direction.")
-                return
+                continue
             GTFSShape.objects.create(shape_id=shape_id, geometry=geometry, direction=direction)
 

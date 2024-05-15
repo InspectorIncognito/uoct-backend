@@ -5,8 +5,8 @@ from rest_framework import generics
 from rest_framework.permissions import AllowAny
 from rest_framework.response import Response
 from processors.models.shapes import shapes_to_geojson
-from rest_api.models import Shape, Segment, GTFSShape
-from rest_api.serializers import ShapeSerializer, SegmentSerializer, GTFSShapeSerializer
+from rest_api.models import Shape, Segment, GTFSShape, Services
+from rest_api.serializers import ShapeSerializer, SegmentSerializer, GTFSShapeSerializer, ServicesSerializer
 from velocity.grid import GridManager
 from velocity.gtfs import GTFSReader, GTFSManager
 
@@ -36,6 +36,12 @@ class SegmentViewSet(viewsets.ModelViewSet):
 
     def get_queryset(self):
         return Segment.objects.filter(shape__id=self.kwargs['shape_pk']).order_by('sequence')
+
+
+class ServicesViewSet(viewsets.ModelViewSet):
+    permission_classes = [AllowAny]
+    serializer_class = ServicesSerializer
+    queryset = Services.objects.all()
 
 
 class GTFSShapeViewSet(viewsets.ModelViewSet):
@@ -71,8 +77,8 @@ class GridViewSet(generics.GenericAPIView):
         print('GTFS LOADED')
         shapes_geojson = gtfs_manager.get_shape_geojson()
         print('GOT SHAPES')
-        # gtfs_manager.get_services_for_each_segment(shapes_geojson)
-        processed_shapes = gtfs_manager.get_processed_df()
-        gtfs_manager.save_gtfs_shapes_to_db(processed_shapes)
-        print("GTFS shapes saved")
+        gtfs_manager.get_services_for_each_segment(shapes_geojson)
+        #processed_shapes = gtfs_manager.get_processed_df()
+        #gtfs_manager.save_gtfs_shapes_to_db(processed_shapes)
+        #print("GTFS shapes saved")
         return JsonResponse({'status': 'ok'})
