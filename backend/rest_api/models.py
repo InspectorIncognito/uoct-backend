@@ -5,6 +5,7 @@ from geojson.geometry import LineString
 from geojson.feature import Feature
 from typing import Dict, List
 from velocity.constants import DEG_PI, DEG_PI_HALF
+from processors.geometry.point import Point
 
 
 class Shape(models.Model):
@@ -15,7 +16,7 @@ class Shape(models.Model):
     grid_max_lon = models.FloatField(default=-DEG_PI)
 
     def get_segments(self):
-        return Segment.objects.filter(shape=self)
+        return Segment.objects.filter(shape=self).order_by('sequence')
 
     def add_segment(self, sequence: int, geometry: shp_LineString) -> None:
         points = list(geometry.coords)
@@ -43,6 +44,20 @@ class Shape(models.Model):
         geojson = [segment.to_geojson() for segment in segments]
         return geojson
 
+    def get_distance(self):
+        total_distance = 0
+        segments = self.get_segments()
+        for segment in segments:
+            coords = segment.geometry
+            previous_point = None
+            for coord in coords:
+                current_point = Point(coord[0], coord[1])
+                if previous_point is None:
+                    previous_point = Point(coord[0], coord[1])
+                    continue
+                total_distance += previous_point.distance(current_point, algorithm='haversine')
+        return int(total_distance)
+
     def __str__(self):
         return f"'{self.name}'"
 
@@ -60,7 +75,7 @@ class Segment(models.Model):
             "shape_id": self.shape.pk,
             "sequence": self.sequence,
         }
-        speed = Speed.objects.filter(segment=self).first()
+        speed = Speed.objects.filter(segment=self).order_by('timestamp').first()
         if speed is not None:
             properties["speed"] = speed.speed
         services = Services.objects.filter(segment=self).first()
@@ -76,6 +91,7 @@ class Segment(models.Model):
 class Speed(models.Model):
     segment = models.ForeignKey(Segment, on_delete=models.CASCADE)
     speed = models.FloatField(blank=False, null=False)
+    timestamp = models.DateTimeField(auto_now_add=True)
 
 
 class Services(models.Model):
@@ -96,4 +112,3 @@ class GTFSShape(models.Model):
                 'direction': str(self.direction)
             }
         )
-

@@ -24,6 +24,12 @@ class ShapeManager:
     def get_segments(self) -> Dict[int, List[Segment]]:
         return {shape.pk: list(shape.get_segments()) for shape in self.shapes}
 
+    def get_distances(self):
+        shape_dict = {}
+        for shape in self.shapes:
+            shape_dict[shape.pk] = shape.get_distance()
+        return shape_dict
+
     def to_geojson(self):
         return FeatureCollection(
             features=[

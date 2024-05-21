@@ -8,6 +8,7 @@ from typing import List
 import pytz
 
 from processors.geometry.point import Point
+from rest_api.util.shape import ShapeManager
 from velocity.expedition import GridManager
 
 logger = logging.getLogger(__name__)
@@ -110,10 +111,10 @@ class PartialTemporalSegment(TemporalSegment):
 
 class SegmentCriteria:
 
-    def __init__(self, grid_manager: GridManager, gtfs_manager):
+    def __init__(self, grid_manager: GridManager):
         self.grid_manager = grid_manager
-        self.gtfs_manager = gtfs_manager
         self.temporal_segment_duration = 30  # in minutes
+        self.shape_manager = ShapeManager()
 
     def get_spatial_segment(self, *args, **kwargs):
         raise NotImplementedError('You must create a subclass of')
@@ -187,29 +188,14 @@ class SegmentCriteria:
 
 class FiveHundredMeterSegmentCriteria(SegmentCriteria):
 
-    def __init__(self, grid_manager, gtfs_manager):
-        super().__init__(grid_manager, gtfs_manager)
+    def __init__(self, grid_manager):
+        super().__init__(grid_manager)
         self.spatial_segment_distance = 500  # in meters
         self.shape_id_distance_dict = self.__calculate_shape_distance()
         self.spatial_segments_by_shape_id, self.spatial_segment_init_list_by_shape_id = self.__calculate_spatial_segments()
 
     def __calculate_shape_distance(self):
-        shape_id_dict = self.gtfs_manager.get_shape_id_dict()
-
-        result = dict()
-        # calculate shape distance
-        for shape_id in shape_id_dict:
-            last_latitude = shape_id_dict[shape_id][-1][0]
-            last_longitude = shape_id_dict[shape_id][-1][1]
-            point_obj = Point(last_latitude, last_longitude)
-            dist_to_route, dist_on_route = self.grid_manager.get_on_route_distances(point_obj, shape_id)
-            if dist_on_route is None:
-                raise ValueError(f"Projection error for shape_id {shape_id}")
-            # round to upper integer to catch all gps projections
-            result[shape_id] = math.ceil(dist_on_route)
-            logger.info(f"shape_id {shape_id} has {dist_on_route} meters.")
-
-        return result
+        return self.shape_manager.get_distances()
 
     def __calculate_spatial_segments(self):
         segment_init_list = defaultdict(list)

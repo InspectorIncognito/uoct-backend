@@ -29,3 +29,20 @@ def assign_routes_to_segments():
             services = clipped['shape_id'].tolist()
             create_services(segment, services)
         i += 1
+
+
+def get_all_services():
+    shape_data = {}
+    for service in Services.objects.all():
+        shape_id = service.segment.shape.pk
+        set_services = shape_data.get(shape_id) or set()
+        set_services.update(service.services)
+        shape_data[shape_id] = set_services
+    return shape_data
+
+
+def get_shape_by_route_id(shape_data, route_id):
+    for shape_id in shape_data:
+        if route_id in shape_data[shape_id]:
+            return shape_id
+    return None

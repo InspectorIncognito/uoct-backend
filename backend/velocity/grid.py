@@ -88,8 +88,9 @@ class GridManager(Dict[Tuple[int, int], GridCell]):
 
     def __process_routes(self, grid: Dict[Tuple[int, int], GridCell]) -> Dict[Tuple[int, int], GridCell]:
         segments: Dict[int, List[Segment]] = self.shape_manager.get_segments()
+        # (shape_0, [segment_0 of shape_0, segment_1 of shape_0, ...])
         for shape_id, segments in segments.items():
-            prev_tuple = None
+            prev_tuple: List[float] | None = None
             current_distance = 0
             current_sequence = 1
             for segment in segments:
@@ -195,7 +196,7 @@ class GridManager(Dict[Tuple[int, int], GridCell]):
         ]
         return segments
 
-    def get_on_route_distances(self, point: Point, shape_id: int, previous_distance=None,
+    def get_on_route_distances(self, point: Point, shape_id: str, previous_distance=None,
                                threshold=DISTANCE_THRESHOLD) -> Tuple[float, float] or None:
         segments = set()
         lat_index, lon_index = self.get_cell_indexes_from_point(point.y, point.x)
@@ -249,7 +250,8 @@ class GridManager(Dict[Tuple[int, int], GridCell]):
             distance, projection = self.__get_distances_from_segments(point, segments, threshold, previous_distance)
         return distance, projection
 
-    def __get_distances_from_segments(self, point: Point, segments: List[shp_LineString], distance_threshold,
+    @staticmethod
+    def __get_distances_from_segments(point: Point, segments: List[shp_LineString], distance_threshold,
                                       previous_distance=None) -> Tuple[float, float] or None:
         closest_distance = math.inf
         closest_on_route_distance = math.inf

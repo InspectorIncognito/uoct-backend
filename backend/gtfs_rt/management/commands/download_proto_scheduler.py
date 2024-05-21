@@ -14,7 +14,6 @@ class Command(BaseCommand):
             type=int
         )
 
-
     def handle(self, *args, **options):
         default_hours = 1
         if options['hours']:
