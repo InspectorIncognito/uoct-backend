@@ -9,10 +9,10 @@ from haversine import haversine, Unit
 # Lat: y
 class Point:
     def __init__(self, latitude: float, longitude: float):
-        self.x = latitude
-        self.y = longitude
+        self.latitude = latitude
+        self.longitude = longitude
 
-        self._coordinates = (self.y, self.x)
+        self._coordinates = (self.latitude, self.longitude)
 
     @property
     def coordinates(self) -> Tuple[float, float]:
@@ -31,12 +31,12 @@ class Point:
             return self.haversine_distance(other)
 
     def euclidean_distance(self, other: "Point") -> float:
-        return math.sqrt((other.x - self.x) ** 2 + (other.y - self.y) ** 2)
+        return math.sqrt((other.longitude - self.longitude) ** 2 + (other.latitude - self.latitude) ** 2)
 
     def haversine_distance(self, other: "Point") -> float:
         if not isinstance(other, Point):
             raise ValueError("Other point must be of type Point")
-        return haversine((self.y, self.x), (other.y, other.x), unit=Unit.METERS)
+        return haversine((self.latitude, self.longitude), (other.latitude, other.longitude), unit=Unit.METERS)
 
     def __eq__(self, point: "Point") -> bool:
         """
@@ -48,8 +48,8 @@ class Point:
         if not isinstance(point, Point):
             raise ValueError("Point must be a Point object.")
 
-        are_equal = (self.y == point.y and
-                     self.x == point.x)
+        are_equal = (self.latitude == point.latitude and
+                     self.longitude == point.longitude)
 
         return are_equal
 
@@ -60,7 +60,7 @@ class Point:
         :return: A representation of the point instance as a hash
         :rtype: int
         """
-        return hash((self.y, self.x))
+        return hash((self.latitude, self.longitude))
 
     def __str__(self) -> str:
         """
@@ -69,4 +69,4 @@ class Point:
         :return: A string representation of the point
         :rtype: str
         """
-        return f"Point(latitude={str(self.y)}, longitude={str(self.x)})"
+        return f"Point(latitude={str(self.latitude)}, longitude={str(self.longitude)})"

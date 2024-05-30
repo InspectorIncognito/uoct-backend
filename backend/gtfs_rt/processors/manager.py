@@ -7,15 +7,15 @@ import datetime
 import requests
 from gtfs_rt.models import GPSPulse
 from google.transit import gtfs_realtime_pb2
-from django.utils.timezone import get_current_timezone
+from django.utils import timezone
 
 
 class GTFSRTManager:
     def __init__(self, gtfs_rt_url=PROTO_URL):
         self.url = gtfs_rt_url
-        self.start_datetime = datetime.datetime.now()
+        self.start_datetime = timezone.localtime()
         self.previous_timestamp = '0'
-        self.until_datetime = datetime.datetime.now()
+        self.until_datetime = timezone.localtime()
 
     def __update_until_datetime(self, hours):
         delta = datetime.timedelta(hours=hours)
@@ -50,14 +50,15 @@ class GTFSRTManager:
                     timestamp = entity.vehicle.timestamp
                     route_id = entity.vehicle.trip.route_id
                     direction_id = entity.vehicle.trip.direction_id
+                    license_plate = entity.vehicle.vehicle.license_plate
                     gps = entity.vehicle.position
                     GPSPulse.objects.create(
                         route_id=route_id,
                         direction_id=direction_id,
                         latitude=gps.latitude,
                         longitude=gps.longitude,
-                        timestamp=datetime.datetime.fromtimestamp(timestamp, tz=pytz.timezone(
-                            "America/Santiago")) - datetime.timedelta(hours=4)
+                        license_plate=license_plate,
+                        timestamp=datetime.datetime.fromtimestamp(timestamp).astimezone(timezone.get_current_timezone())
                     )
 
     def run_process(self):
@@ -71,7 +72,7 @@ class GTFSRTManager:
         self.save_gtfs_rt_to_db(feed)
 
     def process_schedule(self, scheduler: sched.scheduler):
-        actual_datetime = datetime.datetime.now()
+        actual_datetime = timezone.localtime()
         print(f"Donwloading file at {actual_datetime}")
         if self.until_datetime < actual_datetime:
             print("Stopping downloading GTFS RT data...")

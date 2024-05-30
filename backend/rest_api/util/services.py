@@ -44,5 +44,5 @@ def get_all_services():
 def get_shape_by_route_id(shape_data, route_id):
     for shape_id in shape_data:
         if route_id in shape_data[shape_id]:
-            return shape_id
+            return str(shape_id)
     return None

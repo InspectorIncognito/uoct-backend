@@ -9,6 +9,7 @@ from rest_api.models import Shape, Segment, GTFSShape, Services
 from rest_api.serializers import ShapeSerializer, SegmentSerializer, GTFSShapeSerializer, ServicesSerializer
 from velocity.grid import GridManager
 from velocity.gtfs import GTFSReader, GTFSManager
+from gtfs_rt.processors.speed import calculate_speed
 
 
 # Create your views here.
@@ -70,15 +71,5 @@ class GridViewSet(generics.GenericAPIView):
     permission_classes = [AllowAny]
 
     def get(self, request):
-        # grid_manager = GridManager()
-        # grid_manager.process()
-        # grid = grid_manager.get_grid()
-        gtfs_manager = GTFSManager()
-        print('GTFS LOADED')
-        shapes_geojson = gtfs_manager.get_shape_geojson()
-        print('GOT SHAPES')
-        gtfs_manager.get_services_for_each_segment(shapes_geojson)
-        #processed_shapes = gtfs_manager.get_processed_df()
-        #gtfs_manager.save_gtfs_shapes_to_db(processed_shapes)
-        #print("GTFS shapes saved")
-        return JsonResponse({'status': 'ok'})
+        speed_records = calculate_speed()
+        return JsonResponse({"speeds": speed_records})

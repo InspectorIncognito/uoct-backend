@@ -8,8 +8,8 @@ class GPSPulse(Point):
         self.timestamp = timestamp
 
     def __hash__(self) -> int:
-        return hash((self.timestamp, self.y, self.x))
+        return hash((self.timestamp, self.latitude, self.longitude))
 
     def __str__(self) -> str:
-        return f"GPS(timestamp={str(self.timestamp)}latitude={str(self.y)}, longitude={str(self.x)})"
+        return f"GPS(timestamp={str(self.timestamp)}latitude={str(self.latitude)}, longitude={str(self.longitude)})"
 

@@ -113,13 +113,14 @@ class SegmentCriteria:
 
     def __init__(self, grid_manager: GridManager):
         self.grid_manager = grid_manager
-        self.temporal_segment_duration = 30  # in minutes
+        self.temporal_segment_duration = 5  # in minutes
         self.shape_manager = ShapeManager()
 
     def get_spatial_segment(self, *args, **kwargs):
         raise NotImplementedError('You must create a subclass of')
 
-    def get_temporal_segment(self, dt: datetime.datetime, timezone: datetime.tzinfo = pytz.UTC):
+    def get_temporal_segment(self, dt: datetime.datetime,
+                             timezone: datetime.tzinfo = pytz.timezone("America/Santiago")):
         if dt.tzinfo is None:
             raise ValueError("datetime instance must have a tzinfo")
         converted_timestamp = dt.astimezone(timezone)
@@ -192,7 +193,8 @@ class FiveHundredMeterSegmentCriteria(SegmentCriteria):
         super().__init__(grid_manager)
         self.spatial_segment_distance = 500  # in meters
         self.shape_id_distance_dict = self.__calculate_shape_distance()
-        self.spatial_segments_by_shape_id, self.spatial_segment_init_list_by_shape_id = self.__calculate_spatial_segments()
+        self.spatial_segments_by_shape_id, self.spatial_segment_init_list_by_shape_id = \
+            self.__calculate_spatial_segments()
 
     def __calculate_shape_distance(self):
         return self.shape_manager.get_distances()

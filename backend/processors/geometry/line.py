@@ -1,5 +1,5 @@
 import math
-
+import numpy as np
 from processors.geometry.point import Point
 from shapely.geometry import LineString as shp_LineString
 from shapely.geometry import Point as shp_Point
@@ -122,17 +122,31 @@ class Line:
         # Get distances of the triangle formed by the line and the point
         line = shp_LineString(coordinates=[self.point_a.coordinates, self.point_b.coordinates])
         point_obj = shp_Point(point.coordinates)
-        distance = line.project(point_obj)
-        pj = shp_Point(list(line.interpolate(distance).coords))
 
-        p_initial = shp_Point(line.coords[0])
+        x = np.array(point_obj.coords[0])
+        u = np.array(line.coords[0])
+        v = np.array(line.coords[len(line.coords) - 1])
 
-        start_to_projection = shp_LineString([p_initial, pj])
-        projection_to_line = shp_LineString([point, pj])
+        n = v - u
+        n /= np.linalg.norm(n, 2)
+        P = u + n * np.dot(x - u, n)
+
+        #distance = line.project(point_obj)
+        #print(P)
+        #exit()
+
+
+        #pj_lat, pj_lon = list(line.interpolate(distance).coords)[0]
+        pj_lat, pj_lon = P
+        pj = Point(pj_lat, pj_lon)
+
+        p_initial_lat, p_initial_lon = line.coords[0]
+        p_initial = Point(p_initial_lat, p_initial_lon)
+
+        start_to_projection = Line(p_initial, pj)
+        projection_to_line = Line(point, pj)
 
         return projection_to_line.length, start_to_projection.length
-
-
 
         distance_a = point.distance(self.point_a, algorithm='haversine')
         distance_b = point.distance(self.point_b, algorithm='haversine')

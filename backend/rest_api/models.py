@@ -1,3 +1,5 @@
+import datetime
+
 from django.contrib.postgres.fields import ArrayField
 from django.db import models
 from shapely.geometry import LineString as shp_LineString
@@ -6,6 +8,7 @@ from geojson.feature import Feature
 from typing import Dict, List
 from velocity.constants import DEG_PI, DEG_PI_HALF
 from processors.geometry.point import Point
+from django.utils import timezone
 
 
 class Shape(models.Model):
@@ -91,7 +94,16 @@ class Segment(models.Model):
 class Speed(models.Model):
     segment = models.ForeignKey(Segment, on_delete=models.CASCADE)
     speed = models.FloatField(blank=False, null=False)
-    timestamp = models.DateTimeField(auto_now_add=True)
+    timestamp = models.DateTimeField(default=timezone.localtime)
+
+
+# TODO: Create alert
+class Alert(models.Model):
+    timestamp = models.DateTimeField()
+    voted_positive = models.IntegerField()
+    voted_negative = models.IntegerField()
+    detected_speed = models.ForeignKey(Speed, on_delete=models.CASCADE)
+    segment = models.ForeignKey(Segment, on_delete=models.CASCADE)
 
 
 class Services(models.Model):

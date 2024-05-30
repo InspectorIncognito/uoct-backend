@@ -27,7 +27,7 @@ class ShapeManager:
     def get_distances(self):
         shape_dict = {}
         for shape in self.shapes:
-            shape_dict[shape.pk] = shape.get_distance()
+            shape_dict[str(shape.pk)] = shape.get_distance()
         return shape_dict
 
     def to_geojson(self):
