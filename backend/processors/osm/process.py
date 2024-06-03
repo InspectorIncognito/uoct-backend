@@ -8,6 +8,8 @@ from shapely.geometry import LineString as shp_LineString
 from rest_api.util.shape import flush_shape_objects
 from rest_api.models import Shape, Segment
 from processors.osm.query import overpass_query, ALAMEDA_QUERY
+from haversine import haversine, Unit
+from processors.geometry.utils import interpolate_points_by_distance, linestring_distance
 
 
 # Separa el geojson en N linestring, con N el número de calles aisladas (alameda ida, alameda vuelta == 2)
@@ -54,36 +56,96 @@ def segment_shape_by_distance(shape: shp_LineString, distance_threshold: float =
         raise ValueError("distance_threshold must be greater than 0.")
     output_linestrings = []
     geom = shape
-    counter = 0
-    geom_len = len(geom.coords)
+    #counter = 0
+    #geom_len = len(geom.coords)
+
+    previous_point = None
+    segment = []
+    distance_accum = 0
+    for point in geom.coords:
+        lon, lat = point
+        current_point = Point(lon, lat)
+        if previous_point is None:
+            previous_point = current_point
+            segment.append(current_point)
+            continue
+        previous_point_aux = p(latitude=previous_point.y, longitude=previous_point.x)
+        current_point_aux = p(latitude=current_point.y, longitude=current_point.x)
+        distance = previous_point_aux.distance(current_point_aux, algorithm=distance_algorithm)
+        if distance_accum + distance >= distance_threshold:
+            left = distance_threshold - distance_accum
+            if left > 1:
+                interpolated_point_coords = interpolate_points_by_distance(previous_point, current_point,
+                                                                           distance_in_meters=left)
+                current_point = Point(interpolated_point_coords)
+            segment.append(current_point)
+            line = shp_LineString(segment)
+            output_linestrings.append(line)
+            previous_point = current_point
+            segment = [current_point]
+            distance_accum = 0
+        else:
+            distance_accum += distance
+            previous_point = current_point
+            segment.append(current_point)
+    if len(segment) != 0:
+        output_linestrings.append(shp_LineString(segment))
+    return output_linestrings
+
+
     while counter < geom_len:
+        print(counter, "VS", geom_len)
         previous_point = None
         distance_accum = 0
         counter = 0
+        point_collection = []
         for point in geom.coords:
-            point_obj = Point(point[0], point[1])
+            lon, lat = point
+            point_obj = Point(lon, lat)
             if previous_point is None:
+                point_collection.append(point_obj)
                 previous_point = point_obj
                 counter += 1
                 continue
-            previous_p_aux = p(previous_point.x, previous_point.y)
-            actual_p_aux = p(point[0], point[1])
-            distance_accum += actual_p_aux.distance(previous_p_aux, algorithm=distance_algorithm)
-            if distance_accum >= distance_threshold:
-                splitted = split(geom, point_obj).geoms
-                output_linestrings.append(splitted[0])
-                if len(splitted) == 2:
-                    geom = splitted[1]
-                    geom_len = len(geom.coords)
-                else:
-                    geom_len = 0
-                    geom = None
-                break
-            else:
+            previous_p_aux = p(latitude=previous_point.y, longitude=previous_point.x)
+            actual_p_aux = p(latitude=lat, longitude=lon)
+            distance = actual_p_aux.distance(previous_p_aux, algorithm=distance_algorithm)
+            if distance_accum + distance >= distance_threshold:
+                print(f"Distance accum is: {distance_accum + distance}. Splitting.")
+                left = abs(distance_threshold - distance_accum)
+                print(f"Left is {left}")
+                if left > 1:
+                    interpolated_point_coords = interpolate_points_by_distance(previous_point, point_obj,
+                                                                               distance_in_meters=left)
+                    point_obj = Point(interpolated_point_coords)
+                    counter -= 1
+
+                point_collection.append(point_obj)
                 counter += 1
+                break
+
+                # splitted = split(geom, point_obj).geoms
+                # print("new splitted:", list(splitted))
+                # output_linestrings.append(splitted[0])
+                # if len(splitted) == 2:
+                #    geom = splitted[1]
+                #    geom_len = len(geom.coords)
+                # else:
+                #    geom_len = 0
+                #    geom = None
+                # break
+            else:
+                distance_accum += distance
                 previous_point = point_obj
-    if geom is not None:
-        output_linestrings.append(geom)
+                point_collection.append(point_obj)
+                counter += 1
+
+    # if geom is not None:
+    #    output_linestrings.append(geom)
+    output_linestrings = map(lambda x: shp_LineString(x), output_linestrings)
+    for output_linestring in output_linestrings:
+        print(linestring_distance(output_linestring))
+    exit()
     return output_linestrings
 
 
@@ -104,9 +166,12 @@ def save_all_segmented_shapes_to_db(segmented_shapes: List[List[shp_LineString]]
 # Crea la consulta, separa los distintos shapes, los mergea y divide en segmentos de 'distance_threshold' metros."
 # Almacena toda la información en la db
 def process_shape_data(distance_threshold: float = 500.0):
+    print("Downloading OSM Overpass data...")
     query_data = gpd.GeoDataFrame.from_features(overpass_query(ALAMEDA_QUERY))
+    print("splitting by shape..")
     splitted_geojson = split_geojson_by_shape(query_data)
     segmented_shapes = []
+    print(f"Got {len(splitted_geojson)} different shapes")
     for idx, feature in enumerate(splitted_geojson):
         merged = merge_shape(feature)
         segmented = segment_shape_by_distance(merged, distance_threshold, distance_algorithm='haversine')

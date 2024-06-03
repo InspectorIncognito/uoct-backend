@@ -50,7 +50,12 @@ class Shape(models.Model):
     def get_distance(self):
         total_distance = 0
         segments = self.get_segments()
+        print(self)
         for segment in segments:
+            distance = segment.get_distance()
+            print(f"distance of {segment} is {distance}")
+            total_distance += distance
+            continue
             coords = segment.geometry
             previous_point = None
             for coord in coords:
@@ -58,7 +63,10 @@ class Shape(models.Model):
                 if previous_point is None:
                     previous_point = Point(coord[0], coord[1])
                     continue
-                total_distance += previous_point.distance(current_point, algorithm='haversine')
+                distance = previous_point.distance(current_point, algorithm='haversine')
+                print("distance between points:", distance)
+                total_distance += distance
+                print('accum distance:', total_distance)
         return int(total_distance)
 
     def __str__(self):
@@ -72,6 +80,17 @@ class Segment(models.Model):
 
     def __str__(self):
         return f"Segment {self.sequence} of Shape {self.shape}"
+
+    def get_distance(self):
+        print(f"{self} has {len(self.geometry)} points")
+        accum_distance = 0
+        previous_point = Point(latitude=self.geometry[0][1], longitude=self.geometry[0][0])
+        for point in self.geometry[1:]:
+            current_point = Point(latitude=point[1], longitude=point[0])
+            distance = current_point.distance(previous_point, algorithm='haversine')
+            accum_distance += distance
+            previous_point = current_point
+        return accum_distance
 
     def to_geojson(self):
         properties = {

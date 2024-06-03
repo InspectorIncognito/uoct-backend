@@ -8,6 +8,7 @@ from rest_api.models import Segment
 from shapely.geometry import LineString as shp_LineString
 from haversine import haversine, Unit
 from processors.geometry.line import PolylineSegment
+from gtfs_rt.models import GPSPulse
 
 DISTANCE_THRESHOLD = 25  # meters
 
@@ -41,6 +42,18 @@ class GridManager(Dict[Tuple[int, int], GridCell]):
         # Matrix representing the grid
         self.grid = None
         self.bbox = None
+
+    def filter_gps(self, start_date, end_date):
+        grid_min_lon, grid_min_lat, grid_max_lon, grid_max_lat = self.get_bbox()
+        filter_query = {
+            "timestamp__gte": start_date,
+            "timestamp__lte": end_date,
+            "latitude__gte": grid_min_lat,
+            "latitude__lte": grid_max_lat,
+            "longitude__gte": grid_min_lon,
+            "longitude__lte": grid_max_lon
+        }
+        return GPSPulse.objects.filter(**filter_query)
 
     def process(self):
         grid = self.__create_grid()
@@ -76,12 +89,10 @@ class GridManager(Dict[Tuple[int, int], GridCell]):
     def __create_grid(self):
         bbox = self.shape_manager.get_bbox()
 
-        grid_min_lon = bbox[0] - 0.001
-        grid_min_lat = bbox[1] - 0.001
-        grid_max_lon = bbox[2] + 0.001
-        grid_max_lat = bbox[3] + 0.001
-
-        self.set_bbox((grid_min_lon, grid_min_lat, grid_max_lon, grid_max_lat))
+        grid_min_lon = bbox[0]
+        grid_min_lat = bbox[1]
+        grid_max_lon = bbox[2]
+        grid_max_lat = bbox[3]
 
         lat_dist = Point(grid_min_lat, grid_min_lon).distance(Point(grid_max_lat, grid_min_lon), algorithm='haversine')
         lon_dist = Point(grid_min_lat, grid_min_lon).distance(Point(grid_min_lat, grid_max_lon), algorithm='haversine')
@@ -100,6 +111,13 @@ class GridManager(Dict[Tuple[int, int], GridCell]):
         self.grid_min_latitude = grid_min_lat
         self.grid_min_longitude = grid_min_lon
 
+        grid_min_lon -= 0.001
+        grid_min_lat -= 0.001
+        grid_max_lon += 0.001
+        grid_max_lat += 0.001
+
+        self.set_bbox((grid_min_lon, grid_min_lat, grid_max_lon, grid_max_lat))
+
         # Return an empty dictionary
         return {}
 
@@ -109,7 +127,7 @@ class GridManager(Dict[Tuple[int, int], GridCell]):
             shape_id = str(shape_id)
             prev_tuple: List[float] | None = None
             current_distance = 0
-            current_sequence = 1
+            current_sequence = 0
             for segment in segments:
                 coords: List[List[float]] = segment.geometry
                 for coord in coords:
