@@ -12,3 +12,5 @@ typer
 geojson
 overpass
 geopandas
+haversine
+gtfs-realtime-bindings==1.0.0

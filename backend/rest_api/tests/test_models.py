@@ -4,6 +4,7 @@ from rest_api.tests.tests_views_base import BaseTestCase
 from rest_api.models import Shape, Segment
 from geojson.geometry import LineString, MultiLineString
 from geojson.feature import Feature, FeatureCollection
+from shapely.geometry import LineString as shp_LineString
 from processors.models.shapes import shapes_to_geojson
 
 
@@ -68,6 +69,35 @@ class ShapeTest(GeometryTestCase):
         flush_shape_objects()
         self.assertTrue(len(Shape.objects.all()) == 0)
         self.assertTrue(len(Segment.objects.all()) == 0)
+
+    def test_add_segment(self):
+        shape = self.create_shape()
+        segments = [
+            shp_LineString(coordinates=[(0.0, 0.0), (0.0, 1.0), (0.0, 2.0)]),
+            shp_LineString(coordinates=[(0.0, 2.0), (1.0, 2.0), (3.0, 2.0)]),
+        ]
+        for idx, segment in enumerate(segments):
+            shape.add_segment(sequence=idx, geometry=segment)
+
+        segments_obj = Segment.objects.filter(shape=shape)
+        self.assertTrue(len(segments_obj) == len(segments))
+
+    def test_add_segment_bbox(self):
+        shape = self.create_shape()
+        segments = [
+            shp_LineString(coordinates=[(0.0, 0.0), (0.0, 1.0), (0.0, 2.0)]),
+            shp_LineString(coordinates=[(0.0, 2.0), (1.0, 2.0), (3.0, 2.0)]),
+        ]
+        for idx, segment in enumerate(segments):
+            shape.add_segment(sequence=idx, geometry=segment)
+        grid_min_lat = 0.0
+        grid_max_lat = 2.0
+        grid_min_lon = 0.0
+        grid_max_lon = 3.0
+        expected = [grid_min_lon, grid_min_lat, grid_max_lon, grid_max_lat]
+        shape = Shape.objects.get(pk=shape.pk)
+        actual = shape.get_bbox()
+        self.assertListEqual(expected, actual)
 
 
 class SegmentTest(GeometryTestCase):

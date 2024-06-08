@@ -27,7 +27,8 @@ urlpatterns = [
     path('api/schema/swagger-ui/', SpectacularSwaggerView.as_view(url_name='schema'), name='swagger-ui'),
     path('admin/', admin.site.urls),
     path('api/gps/', include(('gps.urls', 'gps'), namespace='gps')),
-    path('api/geo/', include(('rest_api.urls', 'geo'), namespace='geo'))
+    path('api/geo/', include(('rest_api.urls', 'geo'), namespace='geo')),
+    path('api/gtfs_rt/', include(('gtfs_rt.routers', 'gtfs_rt'), namespace='gtfs_rt')),
 ]
 
 

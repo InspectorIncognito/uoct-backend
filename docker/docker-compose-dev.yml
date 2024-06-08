@@ -1,5 +1,3 @@
-version: '3.7'
-
 x-dev-server:
   &dev-server
   build:

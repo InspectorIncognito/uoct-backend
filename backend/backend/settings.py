@@ -51,7 +51,8 @@ if DEBUG:
 LOCAL_APPS = [
     'user',
     'rest_api',
-    'gps'
+    'gps',
+    'gtfs_rt'
 ]
 
 INSTALLED_APPS = DJANGO_APPS + THIRD_PARTY_APPS + LOCAL_APPS
@@ -133,7 +134,7 @@ AUTH_PASSWORD_VALIDATORS = [
 
 LANGUAGE_CODE = 'en-us'
 
-TIME_ZONE = 'UTC'
+TIME_ZONE = 'America/Santiago'
 
 USE_I18N = True
 

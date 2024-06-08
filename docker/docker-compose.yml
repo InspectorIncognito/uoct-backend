@@ -1,5 +1,3 @@
-version: '3.7'
-
 x-prod-server:
   &prod-server
   build:

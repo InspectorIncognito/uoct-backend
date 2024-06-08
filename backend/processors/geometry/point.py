@@ -1,13 +1,28 @@
 import math
+from typing import Tuple
+
 from processors.geometry.constants import EARTH_RADIUS_KM
+from haversine import haversine, Unit
 
 
 # Lon: x
 # Lat: y
 class Point:
-    def __init__(self, x, y):
-        self.x = x
-        self.y = y
+    def __init__(self, latitude: float, longitude: float):
+        self.latitude = latitude
+        self.longitude = longitude
+
+        self._coordinates = (self.latitude, self.longitude)
+
+    @property
+    def coordinates(self) -> Tuple[float, float]:
+        """
+        Get the length of the line.
+
+        :return: A float value that corresponds to the length of the line.
+        :rtype: float
+        """
+        return self._coordinates
 
     def distance(self, other: "Point", algorithm: str = 'euclidean') -> float:
         if algorithm == 'euclidean':
@@ -16,25 +31,12 @@ class Point:
             return self.haversine_distance(other)
 
     def euclidean_distance(self, other: "Point") -> float:
-        return math.sqrt((other.x - self.x) ** 2 + (other.y - self.y) ** 2)
+        return math.sqrt((other.longitude - self.longitude) ** 2 + (other.latitude - self.latitude) ** 2)
 
     def haversine_distance(self, other: "Point") -> float:
         if not isinstance(other, Point):
             raise ValueError("Other point must be of type Point")
-
-        lat1, lon1 = math.radians(self.y), math.radians(self.x)
-        lat2, lon2 = math.radians(other.y), math.radians(other.x)
-
-        lon_dist, lat_dist = lon2 - lon1, lat2 - lat1
-
-        # Apply the Haversine formula to calculate the distance between two points on the surface of the earth
-        a = math.sin(lat_dist / 2) ** 2 + math.cos(lat1) * math.cos(lat2) * math.sin(lon_dist / 2) ** 2
-        c = 2 * math.atan2(math.sqrt(a), math.sqrt(1 - a))
-
-        # Calculate the distance in meters
-        distance = EARTH_RADIUS_KM * c * 1000
-
-        return distance
+        return haversine((self.latitude, self.longitude), (other.latitude, other.longitude), unit=Unit.METERS)
 
     def __eq__(self, point: "Point") -> bool:
         """
@@ -46,8 +48,8 @@ class Point:
         if not isinstance(point, Point):
             raise ValueError("Point must be a Point object.")
 
-        are_equal = (self.y == point.y and
-                     self.x == point.x)
+        are_equal = (self.latitude == point.latitude and
+                     self.longitude == point.longitude)
 
         return are_equal
 
@@ -58,7 +60,7 @@ class Point:
         :return: A representation of the point instance as a hash
         :rtype: int
         """
-        return hash((self.y, self.x))
+        return hash((self.latitude, self.longitude))
 
     def __str__(self) -> str:
         """
@@ -67,4 +69,4 @@ class Point:
         :return: A string representation of the point
         :rtype: str
         """
-        return f"Point(latitude={str(self.y)}, longitude={str(self.x)})"
+        return f"Point(latitude={str(self.latitude)}, longitude={str(self.longitude)})"
