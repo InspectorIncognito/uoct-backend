@@ -5,6 +5,7 @@ from geojson.geometry import LineString
 from shapely.geometry import LineString as shp_LineString
 from processors.osm.process import split_geojson_by_shape, merge_shape, segment_shape_by_distance, process_shape_data
 import pandas as pd
+from unittest import skip
 
 
 class TestProcess(BaseTestCase):
@@ -69,6 +70,7 @@ class TestProcess(BaseTestCase):
         expected = gpd.GeoDataFrame(pd.concat(expected, ignore_index=True))
         self.assertTrue(actual.equals(expected))
 
+    @skip("Skipping this test for now.")
     def test_process_pipeline(self):
         pass#process_shape_data()
 

@@ -91,9 +91,9 @@ class ShapeTest(GeometryTestCase):
         for idx, segment in enumerate(segments):
             shape.add_segment(sequence=idx, geometry=segment)
         grid_min_lat = 0.0
-        grid_max_lat = 3.0
+        grid_max_lat = 2.0
         grid_min_lon = 0.0
-        grid_max_lon = 2.0
+        grid_max_lon = 3.0
         expected = [grid_min_lon, grid_min_lat, grid_max_lon, grid_max_lat]
         shape = Shape.objects.get(pk=shape.pk)
         actual = shape.get_bbox()

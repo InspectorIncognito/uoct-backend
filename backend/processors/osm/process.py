@@ -56,8 +56,6 @@ def segment_shape_by_distance(shape: shp_LineString, distance_threshold: float =
         raise ValueError("distance_threshold must be greater than 0.")
     output_linestrings = []
     geom = shape
-    #counter = 0
-    #geom_len = len(geom.coords)
 
     previous_point = None
     segment = []
@@ -83,6 +81,8 @@ def segment_shape_by_distance(shape: shp_LineString, distance_threshold: float =
             output_linestrings.append(line)
             previous_point = current_point
             segment = [current_point]
+            if point == geom.coords[-1]:
+                segment = []
             distance_accum = 0
         else:
             distance_accum += distance
@@ -92,61 +92,6 @@ def segment_shape_by_distance(shape: shp_LineString, distance_threshold: float =
         output_linestrings.append(shp_LineString(segment))
     return output_linestrings
 
-
-    while counter < geom_len:
-        print(counter, "VS", geom_len)
-        previous_point = None
-        distance_accum = 0
-        counter = 0
-        point_collection = []
-        for point in geom.coords:
-            lon, lat = point
-            point_obj = Point(lon, lat)
-            if previous_point is None:
-                point_collection.append(point_obj)
-                previous_point = point_obj
-                counter += 1
-                continue
-            previous_p_aux = p(latitude=previous_point.y, longitude=previous_point.x)
-            actual_p_aux = p(latitude=lat, longitude=lon)
-            distance = actual_p_aux.distance(previous_p_aux, algorithm=distance_algorithm)
-            if distance_accum + distance >= distance_threshold:
-                print(f"Distance accum is: {distance_accum + distance}. Splitting.")
-                left = abs(distance_threshold - distance_accum)
-                print(f"Left is {left}")
-                if left > 1:
-                    interpolated_point_coords = interpolate_points_by_distance(previous_point, point_obj,
-                                                                               distance_in_meters=left)
-                    point_obj = Point(interpolated_point_coords)
-                    counter -= 1
-
-                point_collection.append(point_obj)
-                counter += 1
-                break
-
-                # splitted = split(geom, point_obj).geoms
-                # print("new splitted:", list(splitted))
-                # output_linestrings.append(splitted[0])
-                # if len(splitted) == 2:
-                #    geom = splitted[1]
-                #    geom_len = len(geom.coords)
-                # else:
-                #    geom_len = 0
-                #    geom = None
-                # break
-            else:
-                distance_accum += distance
-                previous_point = point_obj
-                point_collection.append(point_obj)
-                counter += 1
-
-    # if geom is not None:
-    #    output_linestrings.append(geom)
-    output_linestrings = map(lambda x: shp_LineString(x), output_linestrings)
-    for output_linestring in output_linestrings:
-        print(linestring_distance(output_linestring))
-    exit()
-    return output_linestrings
 
 
 def save_segmented_shape_to_db(segmented_shape: List[shp_LineString], shape_name: str):
