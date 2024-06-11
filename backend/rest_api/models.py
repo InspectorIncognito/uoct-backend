@@ -103,8 +103,10 @@ class Segment(models.Model):
         services = Services.objects.filter(segment=self).first()
         if services is not None:
             properties["services"] = services.services
+        line = shp_LineString(coordinates=self.geometry)
+        line = line.simplify(tolerance=0.00001)
         feature = Feature(
-            geometry=LineString(coordinates=self.geometry),
+            geometry=LineString(coordinates=list(line.coords)),
             properties=properties
         )
         return feature
@@ -114,6 +116,15 @@ class Speed(models.Model):
     segment = models.ForeignKey(Segment, on_delete=models.CASCADE)
     speed = models.FloatField(blank=False, null=False)
     timestamp = models.DateTimeField(default=timezone.localtime)
+    day_type = models.CharField(max_length=1, blank=False, null=False, default="L")
+
+
+class HistoricSpeed(models.Model):
+    shape_id = models.ForeignKey(Segment, on_delete=models.CASCADE)
+    speed = models.FloatField(blank=False, null=False)
+    timestamp = models.DateTimeField(default=timezone.localtime)
+    day_type = models.CharField(max_length=1, blank=False, null=False, default="L")
+
 
 
 # TODO: Create alert
