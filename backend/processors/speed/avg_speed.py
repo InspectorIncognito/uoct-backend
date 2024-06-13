@@ -1,7 +1,7 @@
 from rest_api.models import Speed, HistoricSpeed
 from datetime import datetime
 from django.db.models import Avg
-
+from django.utils import timezone
 
 def get_avg_speed_by_month(year, month):
     start_date = datetime(year, month, 1, 0, 0, 0, 0)
@@ -10,9 +10,12 @@ def get_avg_speed_by_month(year, month):
     else:
         end_date = datetime(year, month + 1, 1, 0, 0, 0)
 
+    start_date = timezone.make_aware(start_date, timezone.get_current_timezone())
+    end_date = timezone.make_aware(end_date, timezone.get_current_timezone())
+
     speeds_in_month = Speed.objects.filter(
         timestamp__gte=start_date,
-        timestamp_lt=end_date,
+        timestamp__lt=end_date,
     )
 
     avg_speeds = (speeds_in_month.
