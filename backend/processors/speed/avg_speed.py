@@ -1,7 +1,8 @@
-from rest_api.models import Speed, HistoricSpeed
+from rest_api.models import Speed, HistoricSpeed, Segment
 from datetime import datetime
 from django.db.models import Avg
 from django.utils import timezone
+
 
 def get_avg_speed_by_month(year, month):
     start_date = datetime(year, month, 1, 0, 0, 0, 0)
@@ -26,11 +27,10 @@ def get_avg_speed_by_month(year, month):
     return avg_speeds
 
 
-def save_historic_avg_speed(avg_speeds):
+def save_historic_avg_speed(avg_speeds, custom_datetime=None):
     for avg_speed in avg_speeds:
-        historic_speed_data = {
-            "segment": avg_speed["segment"],
-            "day_type": avg_speed["day_type"],
-            "speed": avg_speed["avg_speed"]
-        }
+        historic_speed_data = {"segment": Segment.objects.get(pk=avg_speed["segment"]),
+                               "day_type": avg_speed["day_type"],
+                               "speed": avg_speed["avg_speed"],
+                               'timestamp': custom_datetime if custom_datetime is not None else None}
         HistoricSpeed.objects.create(**historic_speed_data)

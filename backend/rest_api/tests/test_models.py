@@ -47,13 +47,19 @@ class ShapeTest(GeometryTestCase):
     def test_to_geojson(self):
         shape, segments = self.create_segments()
         actual = shape.to_geojson()
-        expected = [Feature(
-            geometry=LineString(coordinates=segment.geometry),
-            properties={
-                "shape_id": shape.pk,
-                "sequence": segment.sequence
-            }
-        ) for segment in segments]
+        expected = []
+        for segment in segments:
+            simplified_linestring = shp_LineString(coordinates=segment.geometry).simplify(tolerance=0.00001)
+            expected.append(
+                Feature(
+                    geometry=LineString(coordinates=list(simplified_linestring.coords)),
+                    properties={
+                        "shape_id": segment.shape.pk,
+                        "sequence": segment.sequence,
+                        "color": "#DDDDDD"
+                    }
+                )
+            )
         self.assertEqual(actual, expected)
 
     def test_to_geojson_with_no_segments(self):
@@ -121,13 +127,20 @@ class SegmentTest(GeometryTestCase):
 
     def test_to_geojson(self):
         shape, segments = self.create_segments()
-        expected = [Feature(
-            geometry=LineString(coordinates=segment.geometry),
-            properties={
-                "shape_id": segment.shape.pk,
-                "sequence": segment.sequence
-            }
-        ) for segment in segments]
+
+        expected = []
+        for segment in segments:
+            simplified_linestring = shp_LineString(coordinates=segment.geometry).simplify(tolerance=0.00001)
+            expected.append(
+                Feature(
+                    geometry=LineString(coordinates=list(simplified_linestring.coords)),
+                    properties={
+                        "shape_id": segment.shape.pk,
+                        "sequence": segment.sequence,
+                        "color": "#DDDDDD"
+                    }
+                )
+            )
         actual = [segment.to_geojson() for segment in segments]
         self.assertEqual(actual, expected)
 

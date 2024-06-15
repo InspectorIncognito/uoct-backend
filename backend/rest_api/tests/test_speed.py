@@ -1,15 +1,8 @@
-from rest_api.util.shape import flush_shape_objects
-
+from rest_api.models import HistoricSpeed
 from rest_api.tests.tests_views_base import BaseTestCase
-from rest_api.models import Shape, Segment
-from geojson.geometry import LineString, MultiLineString
-from geojson.feature import Feature, FeatureCollection
-from shapely.geometry import LineString as shp_LineString
-from processors.models.shapes import shapes_to_geojson
-
 from rest_api.factories import ShapeFactory, SegmentFactory, SpeedFactory, create_speed_dataset
 from datetime import datetime
-from processors.speed.avg_speed import get_avg_speed_by_month
+from processors.speed.avg_speed import get_avg_speed_by_month, save_historic_avg_speed
 from django.utils import timezone
 
 
@@ -37,9 +30,20 @@ class SpeedTest(BaseTestCase):
         self.assertEqual(january_speed[0]['segment'], self.segment.pk)
 
     def test_store_historic_speeds(self):
+        this_year = timezone.now().year
         dataset = create_speed_dataset()
-        print(dataset)
-        for shape_id in dataset:
-            for segments_id in dataset[shape_id]:
-                pass
+        for month in range(1, 13):
+            creation_datetime = datetime(this_year, month, 1)
+            creation_datetime = timezone.make_aware(creation_datetime, timezone.get_current_timezone())
+            avg_speeds = get_avg_speed_by_month(this_year, month)
+            save_historic_avg_speed(avg_speeds, creation_datetime)
+
+        for segment_id in dataset["segments"]:
+            for month_data in dataset["segments"][segment_id]:
+                month = month_data["date"]
+                expected_speed = month_data["expected_speed"]
+                creation_datetime = datetime(this_year, month, 1)
+                creation_datetime = timezone.make_aware(creation_datetime, timezone.get_current_timezone())
+                historic_speed = HistoricSpeed.objects.get(segment__pk=segment_id, timestamp=creation_datetime)
+                self.assertEqual(historic_speed.speed, expected_speed)
 
