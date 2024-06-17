@@ -26,6 +26,9 @@ test_down:
 build:
 	$(COMPOSE_DEV) build
 
+rebuild:
+	$(COMPOSE_DEV) build --no-cache
+
 up:
 	$(COMPOSE_DEV) up
 

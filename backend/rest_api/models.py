@@ -9,6 +9,7 @@ from typing import Dict, List
 from velocity.constants import DEG_PI, DEG_PI_HALF
 from processors.geometry.point import Point
 from django.utils import timezone
+from rest_api.vars import SPEED_COLOR_RANGES
 
 
 class Shape(models.Model):
@@ -97,14 +98,19 @@ class Segment(models.Model):
             "shape_id": self.shape.pk,
             "sequence": self.sequence,
         }
-        speed = Speed.objects.filter(segment=self).order_by('timestamp').first()
+        speed: Speed = Speed.objects.filter(segment=self).order_by('timestamp').first()
         if speed is not None:
             properties["speed"] = speed.speed
+            properties["color"] = speed.assign_color()
+        else:
+            properties["color"] = "#DDDDDD"
         services = Services.objects.filter(segment=self).first()
         if services is not None:
             properties["services"] = services.services
+        line = shp_LineString(coordinates=self.geometry)
+        line = line.simplify(tolerance=0.00001)
         feature = Feature(
-            geometry=LineString(coordinates=self.geometry),
+            geometry=LineString(coordinates=list(line.coords)),
             properties=properties
         )
         return feature
@@ -114,6 +120,20 @@ class Speed(models.Model):
     segment = models.ForeignKey(Segment, on_delete=models.CASCADE)
     speed = models.FloatField(blank=False, null=False)
     timestamp = models.DateTimeField(default=timezone.localtime)
+    day_type = models.CharField(max_length=1, blank=False, null=False, default="L")
+
+    def assign_color(self):
+        for min_speed, max_speed, color in SPEED_COLOR_RANGES:
+            if min_speed <= self.speed <= max_speed:
+                return color
+        return "#000000"
+
+
+class HistoricSpeed(models.Model):
+    segment = models.ForeignKey(Segment, on_delete=models.CASCADE)
+    speed = models.FloatField(blank=False, null=False)
+    timestamp = models.DateTimeField(default=timezone.localtime)
+    day_type = models.CharField(max_length=1, blank=False, null=False, default="L")
 
 
 # TODO: Create alert
