@@ -87,3 +87,8 @@ class GTFSRTManager:
         scheduler = sched.scheduler(time.time, time.sleep)
         scheduler.enter(60, 1, self.process_schedule, (scheduler,))
         scheduler.run()
+
+    def run_process_cron(self):
+        raw_data = self.download_raw_gtfs_rt_data()
+        feed = self.read_proto_raw_content(raw_data)
+        self.save_gtfs_rt_to_db(feed)

@@ -12,6 +12,8 @@ from velocity.segment import FiveHundredMeterSegmentCriteria
 import pandas as pd
 from gtfs_rt.utils import median_absolute_deviation
 from rest_api.models import Speed, Segment
+from django.utils import timezone
+
 
 class Command(BaseCommand):
     help = 'Calculate speed for all segments of each shape in a range of time.'
@@ -29,21 +31,39 @@ class Command(BaseCommand):
         )
 
     def handle(self, *args, **options):
+        delta = datetime.timedelta(minutes=15)
+
+        """today_weekday = datetime.date.today().weekday()
+        today_weekday = "L" if today_weekday < 5 else "S" if today_weekday == 5 else "D"
         # TODO: filter by start_date and end_date arguments
         # By default, calculates the commercial speed mean from the last 15 minutes of every segment.
         end_date_hardcode = datetime.datetime(year=2024, month=5, day=22, hour=16, minute=0, second=0)
         end_date = end_date_hardcode.astimezone(TIMEZONE)
-        start_date = (end_date_hardcode - datetime.timedelta(minutes=15)).astimezone(TIMEZONE)
-        # Filters GPS inside the grid bbox
-        # queryset = GPSPulse.objects.filter(timestamp__gte=start_date, timestamp__lte=end_date)
+        start_date = (end_date_hardcode - datetime.timedelta(minutes=15)).astimezone(TIMEZONE)"""
+
+        if not options["start_time"]:
+            start_date = timezone.localtime()
+            start_date = start_date.replace(second=0, microsecond=0)
+        else:
+            start_date = datetime.datetime.strftime(options["start_time"], "%Y-%m-%d %H:%M:%S")
+            start_date = timezone.make_aware(start_date, timezone.get_current_timezone())
+            start_date.replace(second=0, microsecond=0)
+        end_date = start_date - delta
+
+        today_weekday = start_date.weekday()
+        today_weekday = "L" if today_weekday < 5 else "S" if today_weekday == 5 else "D"
+
         print(f"Start date: {start_date}")
         print(f"End date: {end_date}")
 
+        # Filters GPS inside the grid bbox
         print("Creating Grid Object")
         grid_obj = generate_grid()
+
         print("Creating Vehicle Manager")
         vm = VehicleManager(grid_obj)
 
+        print("Querying GPS pulses...")
         queryset = grid_obj.filter_gps(start_date, end_date)
         print(f"Got {len(queryset)} GPS pulses.")
 
@@ -53,8 +73,6 @@ class Command(BaseCommand):
             percent = (i + 1) / len(queryset) * 100
             print(f'\rProgress: {percent:.2f}% ({i + 1}/{len(queryset)} pulses) [{int(time.time() - start_time)} s]',
                   end='')
-            #if not grid_obj.contains_gps(gps):
-            #    continue
             vm.add_data(gps)
         print()
 
@@ -73,10 +91,10 @@ class Command(BaseCommand):
                       right_index=True).sort_values(
             by=['shape_id', 'spatial_segment_index', 'local_temporal_segment_index'])
 
-        medianas = df.groupby(by=['shape_id', 'spatial_segment_index', 'local_temporal_segment_index'])[
+        medians = df.groupby(by=['shape_id', 'spatial_segment_index', 'local_temporal_segment_index'])[
             'speed(km/h)'].transform(
             'median')
-        df["threshold"] = (df["speed(km/h)"] - medianas) / df["MAD"]
+        df["threshold"] = (df["speed(km/h)"] - medians) / df["MAD"]
 
         threshold_min = -2
         threshold_max = 2
@@ -91,9 +109,9 @@ class Command(BaseCommand):
             sequence = row[1]
             speed_data = {
                 "segment": Segment.objects.get(shape__pk=shape_id, sequence=sequence),
-                "speed": data['speed(km/h)']
+                "speed": data['speed(km/h)'],
+                "day_type": today_weekday
             }
 
             Speed.objects.create(**speed_data)
         print("Speed records up to date.")
-        #print(df.to_string())

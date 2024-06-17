@@ -204,6 +204,7 @@ RQ_QUEUES = {
 }
 
 RQ = {"DEFAULT_RESULT_TTL": 60 * 60 * 24}
+CRONLIKE_QUEUE = 'commands_queue'
 
 # Custom handler to failed jobs
 RQ_EXCEPTION_HANDLERS = []
