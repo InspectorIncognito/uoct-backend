@@ -39,7 +39,8 @@ webserver-prod)
 worker)
   echo "starting worker"
   # TODO: if you define a new queue, you must add it as a new param in this command call
-  python ./backend/manage.py rqworker default email_sender
+  echo "running commands"
+  python ./backend/manage.py rqworker default email_sender cronlike &
   python ./backend/manage.py custom_rqscheduler
   ;;
 test)

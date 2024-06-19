@@ -1,11 +1,7 @@
-import os
-import logging
 import datetime
 import time
 
-from django.core.management import BaseCommand, CommandError
-from gtfs_rt.models import GPSPulse
-from gtfs_rt.config import TIMEZONE
+from django.core.management import BaseCommand
 from velocity.utils import generate_grid
 from velocity.vehicle import VehicleManager
 from velocity.segment import FiveHundredMeterSegmentCriteria
@@ -31,15 +27,8 @@ class Command(BaseCommand):
         )
 
     def handle(self, *args, **options):
+        print("Running calculate_speed")
         delta = datetime.timedelta(minutes=15)
-
-        """today_weekday = datetime.date.today().weekday()
-        today_weekday = "L" if today_weekday < 5 else "S" if today_weekday == 5 else "D"
-        # TODO: filter by start_date and end_date arguments
-        # By default, calculates the commercial speed mean from the last 15 minutes of every segment.
-        end_date_hardcode = datetime.datetime(year=2024, month=5, day=22, hour=16, minute=0, second=0)
-        end_date = end_date_hardcode.astimezone(TIMEZONE)
-        start_date = (end_date_hardcode - datetime.timedelta(minutes=15)).astimezone(TIMEZONE)"""
 
         if not options["start_time"]:
             start_date = timezone.localtime()

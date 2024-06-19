@@ -31,4 +31,6 @@ urlpatterns = [
     path('api/gtfs_rt/', include(('gtfs_rt.routers', 'gtfs_rt'), namespace='gtfs_rt')),
 ]
 
-
+urlpatterns += [
+    path('django-rq/', include('django_rq.urls'))
+]

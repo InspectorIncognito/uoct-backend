@@ -68,7 +68,7 @@ services:
 
   worker:
     <<: *prod-server
-    profiles: ['prod']
+    profiles: ['prod', 'dev']
     command: worker
     volumes:
       - static_volume_backend:/app/backend/static

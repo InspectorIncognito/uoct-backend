@@ -1,13 +1,11 @@
-import pytz
-
-from gtfs_rt.config import PROTO_URL
 import sched
 import time
 import datetime
 import requests
-from gtfs_rt.models import GPSPulse
-from google.transit import gtfs_realtime_pb2
 from django.utils import timezone
+from gtfs_rt.models import GPSPulse
+from gtfs_rt.config import PROTO_URL
+from google.transit import gtfs_realtime_pb2
 
 
 class GTFSRTManager:
@@ -87,6 +85,16 @@ class GTFSRTManager:
         scheduler = sched.scheduler(time.time, time.sleep)
         scheduler.enter(60, 1, self.process_schedule, (scheduler,))
         scheduler.run()
+
+    def run_process_forever(self):
+        raw_data = self.download_raw_gtfs_rt_data()
+        feed = self.read_proto_raw_content(raw_data)
+        timestamp = self.get_timestamp_from_feed(feed)
+        if timestamp == self.previous_timestamp:
+            print("Ignoring repeated proto file: Same timestamp.")
+            return
+        self.__update_previous_timestamp(timestamp)
+        self.save_gtfs_rt_to_db(feed)
 
     def run_process_cron(self):
         raw_data = self.download_raw_gtfs_rt_data()
