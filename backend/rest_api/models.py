@@ -1,11 +1,8 @@
-import datetime
-
 from django.contrib.postgres.fields import ArrayField
 from django.db import models
 from shapely.geometry import LineString as shp_LineString
 from geojson.geometry import LineString
 from geojson.feature import Feature
-from typing import Dict, List
 from velocity.constants import DEG_PI, DEG_PI_HALF
 from processors.geometry.point import Point
 from django.utils import timezone
@@ -54,9 +51,7 @@ class Shape(models.Model):
         print(self)
         for segment in segments:
             distance = segment.get_distance()
-            print(f"distance of {segment} is {distance}")
             total_distance += distance
-            continue
             coords = segment.geometry
             previous_point = None
             for coord in coords:
@@ -65,9 +60,7 @@ class Shape(models.Model):
                     previous_point = Point(coord[0], coord[1])
                     continue
                 distance = previous_point.distance(current_point, algorithm='haversine')
-                print("distance between points:", distance)
                 total_distance += distance
-                print('accum distance:', total_distance)
         return int(total_distance)
 
     def __str__(self):
@@ -83,7 +76,6 @@ class Segment(models.Model):
         return f"Segment {self.sequence} of Shape {self.shape}"
 
     def get_distance(self):
-        print(f"{self} has {len(self.geometry)} points")
         accum_distance = 0
         previous_point = Point(latitude=self.geometry[0][1], longitude=self.geometry[0][0])
         for point in self.geometry[1:]:
@@ -98,7 +90,7 @@ class Segment(models.Model):
             "shape_id": self.shape.pk,
             "sequence": self.sequence,
         }
-        speed: Speed = Speed.objects.filter(segment=self).order_by('timestamp').first()
+        speed: Speed = Speed.objects.filter(segment=self).order_by('-timestamp').first()
         if speed is not None:
             properties["speed"] = speed.speed
             properties["color"] = speed.assign_color()

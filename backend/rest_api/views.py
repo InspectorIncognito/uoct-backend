@@ -3,12 +3,10 @@ from rest_framework import viewsets
 from django.http import JsonResponse
 from rest_framework import generics
 from rest_framework.permissions import AllowAny
-from rest_framework.response import Response
 from processors.models.shapes import shapes_to_geojson
-from rest_api.models import Shape, Segment, GTFSShape, Services
-from rest_api.serializers import ShapeSerializer, SegmentSerializer, GTFSShapeSerializer, ServicesSerializer
-from velocity.grid import GridManager
-from velocity.gtfs import GTFSReader, GTFSManager
+from rest_api.models import Shape, Segment, GTFSShape, Services, Speed
+from rest_api.serializers import ShapeSerializer, SegmentSerializer, GTFSShapeSerializer, ServicesSerializer, \
+    SpeedSerializer
 from gtfs_rt.processors.speed import calculate_speed
 
 
@@ -19,7 +17,6 @@ class GeoJSONViewSet(generics.GenericAPIView):
     def get(self, request):
         # Returns a GeoJSON with the latest data.
         # This includes the 500-meter-segmented-path with its corresponding velocities
-        # TODO: Change placeholder with real information
         shapes_json = shapes_to_geojson()
 
         return JsonResponse(shapes_json, safe=False)
@@ -43,6 +40,12 @@ class ServicesViewSet(viewsets.ModelViewSet):
     permission_classes = [AllowAny]
     serializer_class = ServicesSerializer
     queryset = Services.objects.all()
+
+
+class SpeedViewSet(viewsets.ModelViewSet):
+    permission_classes = [AllowAny]
+    serializer_class = SpeedSerializer
+    queryset = Speed.objects.all()
 
 
 class GTFSShapeViewSet(viewsets.ModelViewSet):

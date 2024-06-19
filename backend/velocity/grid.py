@@ -6,7 +6,6 @@ from processors.geometry.point import Point
 from typing import List
 from rest_api.models import Segment
 from shapely.geometry import LineString as shp_LineString
-from haversine import haversine, Unit
 from processors.geometry.line import PolylineSegment
 from gtfs_rt.models import GPSPulse
 
@@ -53,7 +52,13 @@ class GridManager(Dict[Tuple[int, int], GridCell]):
             "longitude__gte": grid_min_lon,
             "longitude__lte": grid_max_lon
         }
-        return GPSPulse.objects.filter(**filter_query)
+        return GPSPulse.objects.filter(**filter_query).values(
+            "route_id", "direction_id",
+            "license_plate",
+            "latitude",
+            "longitude",
+            "timestamp",
+        ).distinct()
 
     def process(self):
         grid = self.__create_grid()

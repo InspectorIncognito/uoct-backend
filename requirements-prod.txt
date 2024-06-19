@@ -1,6 +1,7 @@
 django==4.1.1
-django-rq==2.5.1
-rq==1.11.0
+django-rq==2.7.0
+rq==1.12.0
+rq_scheduler==0.13.0
 python-decouple==3.6
 djangorestframework==3.13.1
 django-filter==22.1

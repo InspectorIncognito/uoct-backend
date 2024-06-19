@@ -1,3 +1,7 @@
+import decouple
 from decouple import config
 
-PROTO_URL = config('PROTO_URL')
+try:
+    PROTO_URL = config('PROTO_URL')
+except decouple.UndefinedValueError:
+    PROTO_URL = None

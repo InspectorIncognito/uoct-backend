@@ -5,7 +5,7 @@ import pytz
 
 
 class Command(BaseCommand):
-    help = "Download GTFS RT proto files every 1 minute."
+    help = "Download GTFS RT proto data from Sonda"
 
     def add_arguments(self, parser):
         parser.add_argument(
@@ -15,8 +15,9 @@ class Command(BaseCommand):
         )
 
     def handle(self, *args, **options):
-        default_hours = 1
+        print("Running download_proto_scheduler")
+        default_hours = None  # forever
         if options['hours']:
             default_hours = options['hours']
         gtfs_rt_manager = GTFSRTManager()
-        gtfs_rt_manager.run_process_scheduler(hours=default_hours)
+        gtfs_rt_manager.run_process_scheduler(default_hours)

@@ -38,20 +38,20 @@ class VehicleManager:
 
         self.gps_ignored = 0
 
-    def add_data(self, gps_pulse: GPSPulse):
-        license_plate = gps_pulse.license_plate
+    def add_data(self, gps_pulse: dict):
+        license_plate = gps_pulse["license_plate"]
         vehicle_data = VehicleData(self.grid_manager, license_plate=license_plate)
         if vehicle_data not in self.vehicles:
             self.vehicles[vehicle_data] = vehicle_data
 
         try:
-            route_id = str(gps_pulse.route_id) + ("I" if gps_pulse.direction_id == 0 else "R")
+            route_id = str(gps_pulse["route_id"]) + ("I" if gps_pulse["direction_id"] == 0 else "R")
             shape_id = get_shape_by_route_id(self.services, route_id)
             if shape_id is None:
                 self.gps_ignored += 1
                 raise ValueError(f"Skipping GPS pulse for route {route_id}.")
-            gps_obj = GPS(latitude=gps_pulse.latitude, longitude=gps_pulse.longitude,
-                          timestamp=gps_pulse.timestamp.astimezone(TIMEZONE))
+            gps_obj = GPS(latitude=gps_pulse["latitude"], longitude=gps_pulse["longitude"],
+                          timestamp=gps_pulse["timestamp"].astimezone(TIMEZONE))
             self.vehicles[vehicle_data].add_gps_pulse(gps_obj, shape_id, route_id, license_plate)
         except ValueError as e:
             pass

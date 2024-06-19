@@ -201,9 +201,11 @@ REDIS_CONF = {
 RQ_QUEUES = {
     "email_sender": REDIS_CONF,
     "default": REDIS_CONF,
+    "cronlike": REDIS_CONF
 }
 
 RQ = {"DEFAULT_RESULT_TTL": 60 * 60 * 24}
+CRONLIKE_QUEUE = 'cronlike'
 
 # Custom handler to failed jobs
 RQ_EXCEPTION_HANDLERS = []

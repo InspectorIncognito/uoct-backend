@@ -1,8 +1,7 @@
-from django.core.management.base import BaseCommand, CommandError
-from gtfs_rt.processors.manager import GTFSRTManager
+from django.core.management.base import BaseCommand
 import datetime
-import pytz
-from gtfs_rt.config import SANTIAGO_TIMEZONE
+
+from gtfs_rt.config import TIMEZONE
 from gtfs_rt.models import GPSPulse
 
 
@@ -13,7 +12,7 @@ class Command(BaseCommand):
         print("COMMAND RUNNING")
         gps_pulses = GPSPulse.objects.all()
         for gps_pulse in gps_pulses:
-            timezone = SANTIAGO_TIMEZONE
+            timezone = TIMEZONE
             timestamp = gps_pulse.timestamp
             timestamp_data = {
                 "year": timestamp.year,
