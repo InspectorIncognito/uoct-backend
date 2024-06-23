@@ -20,7 +20,7 @@ def clear_scheduled_jobs():
 def register_scheduled_jobs():
     print("Adding jobs to scheduler")
     scheduler.cron(
-        '* * * * *',  # every minute
+        '0/1 * * * *',  # every minute
         func=download_proto_data,  # Function to be queued
         args=[],  # Arguments passed into function when executed
         queue_name=settings.CRONLIKE_QUEUE,  # In which queue the job should be put in
@@ -28,7 +28,7 @@ def register_scheduled_jobs():
         use_local_timezone=False  # Interpret hours in the local timezone
     )
     scheduler.cron(
-        '*/15 * * * *',  # every 15 minutes
+        '0/15 * * * *',  # every 15 minutes
         func=calculate_speed,  # Function to be queued
         args=[],  # Arguments passed into function when executed
         queue_name=settings.CRONLIKE_QUEUE,  # In which queue the job should be put in

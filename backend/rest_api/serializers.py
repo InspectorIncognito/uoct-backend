@@ -15,9 +15,12 @@ class SegmentSerializer(serializers.ModelSerializer):
 
 
 class SpeedSerializer(serializers.ModelSerializer):
+    shape = serializers.IntegerField(source="segment.shape.id", read_only=True)
+    sequence = serializers.IntegerField(source="segment.sequence", read_only=True)
+
     class Meta:
         model = Speed
-        fields = ['segment', 'speed', 'timestamp']
+        fields = ['shape', 'sequence', 'speed', 'timestamp', 'day_type']
 
 
 class ServicesSerializer(serializers.ModelSerializer):

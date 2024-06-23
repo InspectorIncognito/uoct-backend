@@ -93,7 +93,6 @@ def segment_shape_by_distance(shape: shp_LineString, distance_threshold: float =
     return output_linestrings
 
 
-
 def save_segmented_shape_to_db(segmented_shape: List[shp_LineString], shape_name: str):
     shape = Shape.objects.create(**{"name": shape_name})
     print("Created shape", shape)
