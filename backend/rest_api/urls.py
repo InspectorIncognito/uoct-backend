@@ -9,6 +9,7 @@ urlpatterns = [
     path('shape/', ShapeViewSet.as_view({"get": 'list'}), name="shape"),
     path('services/', ServicesViewSet.as_view({"get": 'list'}), name="services"),
     path('speeds/', SpeedViewSet.as_view({"get": 'list'}), name="speeds"),
+    path('speeds/to_csv/', SpeedViewSet.as_view({"get": "to_csv"}), name="shape-to_csv"),
     path('gtfs_shape/', GTFSShapeViewSet.as_view({"get": 'list'}), name="gtfs_shape"),
     path('gtfs_shape/custom/', GTFSShapeViewSet.as_view({"get": 'geojson'}), name="segments_geojson"),
     path('shape/<int:shape_pk>/segments/', SegmentViewSet.as_view({"get": 'list'}), name="segments"),

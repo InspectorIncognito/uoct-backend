@@ -15,7 +15,7 @@ def create_services(segment, services):
 def assign_routes_to_segments():
     gtfs_shape_manager = GTFSShapeManager()
     shapes = Shape.objects.all()
-    i = 0
+    i = 1
     for shape in shapes:
         segments = shape.get_segments()
         gtfs_shape_manager.filter_by_direction(i)
@@ -28,7 +28,7 @@ def assign_routes_to_segments():
             clipped = gpd.clip(gdf_routes, gdf_buffered)
             services = clipped['shape_id'].tolist()
             create_services(segment, services)
-        i += 1
+        i += -1
 
 
 def get_all_services():

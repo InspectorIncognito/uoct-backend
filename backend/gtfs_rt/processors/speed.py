@@ -2,39 +2,14 @@ import time
 import datetime
 import pandas as pd
 from django.utils import timezone
-from rest_api.models import Segment, Speed
-from gtfs_rt.models import GPSPulse
-from gtfs_rt.config import TIMEZONE
-from gtfs_rt.utils import median_absolute_deviation
+from rest_api.models import Segment, Speed, Shape
 from velocity.vehicle import VehicleManager
 from velocity.segment import FiveHundredMeterSegmentCriteria
 from velocity.utils import generate_grid
 
 
-def calculate_speed_old(start_date: datetime.date = None, end_date: datetime = None):
-    end_date_hardcode = datetime.datetime(year=2024, month=5, day=22, hour=16, minute=0, second=0)
-    end_date = end_date_hardcode.astimezone(TIMEZONE)
-    start_date = (end_date_hardcode - datetime.timedelta(minutes=5)).astimezone(TIMEZONE)
-    queryset = GPSPulse.objects.filter(timestamp__gte=start_date, timestamp__lte=end_date)
-    print(f"Start date: {start_date}")
-    print(f"End date: {end_date}")
-    print(f"Got {len(queryset)} GPS pulses.")
-
-    print("Creating Grid Object")
-    grid_obj = generate_grid()
-    print("Creating Vehicle Manager")
-    vm = VehicleManager(grid_obj)
-
-    for gps in queryset:
-        vm.add_data(gps)
-
-    segment_criteria = FiveHundredMeterSegmentCriteria(grid_obj)
-    speed_records = vm.calculate_speed(segment_criteria)
-    return speed_records
-
-
 def calculate_speed(start_date: datetime.datetime = None, end_date: datetime.datetime = None):
-    print("Running calculate_speed")
+    print("Calling calculate_speed...")
     delta = datetime.timedelta(minutes=15)
 
     if end_date is None:
@@ -78,27 +53,16 @@ def calculate_speed(start_date: datetime.datetime = None, end_date: datetime.dat
     df = pd.DataFrame.from_records(speed_records)[
         ['shape_id', 'spatial_segment_index', 'local_temporal_segment_index', 'distance_mts', 'time_secs']]
 
-    # Removing Outliers
     df['speed(km/h)'] = round(df['distance_mts'] / df['time_secs'] * 3.6, 2)
-    mad_df = df.groupby(by=['shape_id', 'spatial_segment_index', 'local_temporal_segment_index'])[
-        'speed(km/h)'].apply(
-        lambda x: median_absolute_deviation(x))
-    df = df.merge(mad_df.rename("MAD"),
-                  left_on=["shape_id", "spatial_segment_index", "local_temporal_segment_index"],
-                  right_index=True).sort_values(
-        by=['shape_id', 'spatial_segment_index', 'local_temporal_segment_index'])
 
-    medians = df.groupby(by=['shape_id', 'spatial_segment_index', 'local_temporal_segment_index'])[
-        'speed(km/h)'].transform(
-        'median')
-    df["threshold"] = (df["speed(km/h)"] - medians) / df["MAD"]
-
-    threshold_min = -2
-    threshold_max = 2
-    df_filtered = df[(df['threshold'] > threshold_min) & (df['threshold'] < threshold_max)]
+    # Removing outliers
+    # TODO: Remove outliers using historical data (with medians)
+    lower_threshold = 4
+    upper_threshold = 80
+    df = df[(df['speed(km/h)'] > lower_threshold) & (df['speed(km/h)'] <= upper_threshold)]
 
     # Sort df by spatial_segment_index
-    df = df_filtered.groupby(['shape_id', 'spatial_segment_index']).agg({
+    df = df.groupby(['shape_id', 'spatial_segment_index']).agg({
         'speed(km/h)': 'mean'
     })
     for row, data in df.iterrows():

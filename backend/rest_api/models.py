@@ -48,7 +48,6 @@ class Shape(models.Model):
     def get_distance(self):
         total_distance = 0
         segments = self.get_segments()
-        print(self)
         for segment in segments:
             distance = segment.get_distance()
             total_distance += distance
