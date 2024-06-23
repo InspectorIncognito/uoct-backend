@@ -108,6 +108,13 @@ class Segment(models.Model):
         return feature
 
 
+class Stop(models.Model):
+    segment = models.ForeignKey(Segment, on_delete=models.CASCADE)
+    stop_id = models.CharField(max_length=128)
+    latitude = models.FloatField()
+    longitude = models.FloatField()
+
+
 class Speed(models.Model):
     segment = models.ForeignKey(Segment, on_delete=models.CASCADE)
     speed = models.FloatField(blank=False, null=False)
