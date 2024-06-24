@@ -6,6 +6,7 @@ from rest_api.models import Segment, Speed, Shape
 from velocity.vehicle import VehicleManager
 from velocity.segment import FiveHundredMeterSegmentCriteria
 from velocity.utils import generate_grid
+from gtfs_rt.utils import get_temporal_segment
 
 
 def calculate_speed(start_date: datetime.datetime = None, end_date: datetime.datetime = None):
@@ -68,11 +69,18 @@ def calculate_speed(start_date: datetime.datetime = None, end_date: datetime.dat
     for row, data in df.iterrows():
         shape_id = row[0]
         sequence = row[1]
-        speed_data = {
-            "segment": Segment.objects.get(shape__pk=shape_id, sequence=sequence),
-            "speed": data['speed(km/h)'],
-            "day_type": today_weekday
-        }
-
-        Speed.objects.create(**speed_data)
+        try:
+            segment = Segment.objects.get(shape_id=shape_id, sequence=sequence)
+        except Segment.DoesNotExist:
+            print(f"Segment {sequence} from shape {shape_id} does not exists")
+            continue
+        else:
+            temporal_segment = get_temporal_segment(end_date)
+            speed_data = {
+                "segment": segment,
+                "speed": data['speed(km/h)'],
+                "day_type": today_weekday,
+                "temporal_segment": temporal_segment,
+            }
+            Speed.objects.create(**speed_data)
     print("Speed records up to date.")

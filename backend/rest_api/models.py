@@ -51,15 +51,6 @@ class Shape(models.Model):
         for segment in segments:
             distance = segment.get_distance()
             total_distance += distance
-            coords = segment.geometry
-            previous_point = None
-            for coord in coords:
-                current_point = Point(coord[0], coord[1])
-                if previous_point is None:
-                    previous_point = Point(coord[0], coord[1])
-                    continue
-                distance = previous_point.distance(current_point, algorithm='haversine')
-                total_distance += distance
         return int(total_distance)
 
     def __str__(self):
@@ -119,6 +110,7 @@ class Speed(models.Model):
     speed = models.FloatField(blank=False, null=False)
     timestamp = models.DateTimeField(default=timezone.localtime)
     day_type = models.CharField(max_length=1, blank=False, null=False, default="L")
+    temporal_segment = models.IntegerField(blank=False, null=False, default=0)
 
     def assign_color(self):
         for min_speed, max_speed, color in SPEED_COLOR_RANGES:
@@ -130,8 +122,9 @@ class Speed(models.Model):
 class HistoricSpeed(models.Model):
     segment = models.ForeignKey(Segment, on_delete=models.CASCADE)
     speed = models.FloatField(blank=False, null=False)
-    timestamp = models.DateTimeField(default=timezone.localtime)
     day_type = models.CharField(max_length=1, blank=False, null=False, default="L")
+    temporal_segment = models.IntegerField(blank=False, null=False, default=0)
+    timestamp = models.DateTimeField(default=timezone.localtime)
 
 
 # TODO: Create alert

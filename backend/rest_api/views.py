@@ -7,12 +7,13 @@ from django.http import JsonResponse, HttpResponse
 from rest_framework import generics
 from rest_framework.permissions import AllowAny
 from processors.models.shapes import shapes_to_geojson
-from rest_api.models import Shape, Segment, GTFSShape, Services, Speed
+from rest_api.models import Shape, Segment, GTFSShape, Services, Speed, HistoricSpeed
 from rest_api.serializers import ShapeSerializer, SegmentSerializer, GTFSShapeSerializer, ServicesSerializer, \
-    SpeedSerializer
+    SpeedSerializer, HistoricSpeedSerializer
 from gtfs_rt.processors.speed import calculate_speed
 import csv
 import pandas as pd
+
 
 # Create your views here.
 class GeoJSONViewSet(generics.GenericAPIView):
@@ -69,6 +70,12 @@ class SpeedViewSet(viewsets.ModelViewSet):
             writer.writerow(obj)
 
         return response
+
+
+class HistoricSpeedViewSet(viewsets.ModelViewSet):
+    permission_classes = [AllowAny]
+    serializer_class = HistoricSpeedSerializer
+    queryset = HistoricSpeed.objects.all().order_by("segment")
 
 
 class GTFSShapeViewSet(viewsets.ModelViewSet):

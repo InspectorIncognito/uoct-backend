@@ -483,6 +483,15 @@ class ShapesReader(GTFSFileReader):
     def __init__(self, gtfs_zip):
         super().__init__(filename="shapes.txt", gtfs_zip=gtfs_zip)
 
+    @staticmethod
+    def concat_points(group):
+        return [(lon, lat) for lat, lon in zip(group['shape_pt_lat'], group['shape_pt_lon'])]
+
+    def process_df(self, df: pd.DataFrame) -> pd.DataFrame:
+        return df.groupby('shape_id')[['shape_pt_lat', 'shape_pt_lon']].apply(self.concat_points).reset_index(
+            name='coordinates')
+
+
 
 class StopsReader(GTFSFileReader):
     def __init__(self, gtfs_zip):
@@ -492,6 +501,13 @@ class StopsReader(GTFSFileReader):
 class TripsReader(GTFSFileReader):
     def __init__(self, gtfs_zip):
         super().__init__(filename="trips.txt", gtfs_zip=gtfs_zip)
+
+    def get_route_direction(self, shape_id: str):
+        df = self.load_csv_file_as_df()
+        col = df[df['shape_id'] == shape_id]
+        if col.empty:
+            return None
+        return col.iloc[0]['direction_id']
 
 
 class GTFSManager:
@@ -542,6 +558,22 @@ class GTFSManager:
 
         gtfs_zip = ZipFile(gtfs_data)
         return gtfs_zip
+
+    def get_processed_df(self):
+        df = self.shapes_reader.load_csv_file_as_df()
+        return self.shapes_reader.process_df(df)
+
+    def save_gtfs_shapes_to_db(self, processed_df: pd.DataFrame):
+        flush_gtfs_shape_objects()
+        print("processed df shape:", processed_df.shape)
+        for _, row in processed_df.iterrows():
+            shape_id = row['shape_id']
+            geometry = row['coordinates']
+            direction = self.trips_reader.get_route_direction(shape_id)
+            if direction is None:
+                print(f"Shape {shape_id} has no direction.")
+                continue
+            GTFSShape.objects.create(shape_id=shape_id, geometry=geometry, direction=direction)
 
     # Stops
     def assign_stops_to_segments(self):

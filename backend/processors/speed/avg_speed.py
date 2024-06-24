@@ -1,7 +1,26 @@
 from rest_api.models import Speed, HistoricSpeed, Segment
-from datetime import datetime
+from datetime import datetime, timedelta
 from django.db.models import Avg
 from django.utils import timezone
+
+
+def get_last_month_avg_speed():
+    now = timezone.now()
+    yesterday = now - timedelta(days=1)
+    last_month = yesterday.month
+    last_year = yesterday.year
+
+    last_month_speeds = Speed.objects.filter(timestamp__year=last_year, timestamp__month=last_month)
+    avg_speeds = last_month_speeds.values("segment", "day_type", "temporal_segment").annotate(
+        average_segment_speed=Avg("speed")).order_by("segment", "day_type", "temporal_segment")
+    for historic_speed in avg_speeds:
+        historic_speed_data = {
+            "segment": Segment.objects.get(pk=historic_speed["segment"]),
+            "speed": historic_speed["average_segment_speed"],
+            "day_type": historic_speed["day_type"],
+            "temporal_segment": historic_speed["temporal_segment"]
+        }
+        HistoricSpeed.objects.create(**historic_speed_data)
 
 
 def get_avg_speed_by_month(year, month):
