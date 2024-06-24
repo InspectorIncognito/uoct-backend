@@ -82,9 +82,17 @@ class Segment(models.Model):
         }
         speed: Speed = Speed.objects.filter(segment=self).order_by('-timestamp').first()
         if speed is not None:
-            properties["speed"] = speed.speed
+            properties["speed"] = str(speed.speed)
             properties["color"] = speed.assign_color()
+            try:
+                historic_speed = HistoricSpeed.objects.get(segment=self, day_type=speed.day_type,
+                                                           temporal_segment=speed.temporal_segment)
+            except HistoricSpeed.DoesNotExist:
+                properties["historic_speed"] = "Sin registro"
+            else:
+                properties["historic_speed"] = historic_speed.speed
         else:
+            properties["speed"] = "Sin registro"
             properties["color"] = "#DDDDDD"
         services = Services.objects.filter(segment=self).first()
         if services is not None:
