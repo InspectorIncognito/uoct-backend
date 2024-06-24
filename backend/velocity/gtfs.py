@@ -492,7 +492,6 @@ class ShapesReader(GTFSFileReader):
             name='coordinates')
 
 
-
 class StopsReader(GTFSFileReader):
     def __init__(self, gtfs_zip):
         super().__init__(filename="stops.txt", gtfs_zip=gtfs_zip)
@@ -578,4 +577,5 @@ class GTFSManager:
     # Stops
     def assign_stops_to_segments(self):
         stops_df = self.stops_reader.load_csv_file_as_df()
+        stops_df = stops_df[['stop_id', 'stop_lat', 'stop_lon']]
         self.segment_manager.assign_stops_for_each_segment(stops_df)

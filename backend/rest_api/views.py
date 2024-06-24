@@ -1,18 +1,19 @@
 from datetime import datetime
 
 from django.utils import timezone
-from geojson import FeatureCollection
 from rest_framework import viewsets
 from django.http import JsonResponse, HttpResponse
 from rest_framework import generics
 from rest_framework.permissions import AllowAny
 from processors.models.shapes import shapes_to_geojson
-from rest_api.models import Shape, Segment, GTFSShape, Services, Speed, HistoricSpeed
+from rest_api.models import Shape, Segment, GTFSShape, Services, Speed, HistoricSpeed, Stop
 from rest_api.serializers import ShapeSerializer, SegmentSerializer, GTFSShapeSerializer, ServicesSerializer, \
-    SpeedSerializer, HistoricSpeedSerializer
+    SpeedSerializer, HistoricSpeedSerializer, StopSerializer
 from gtfs_rt.processors.speed import calculate_speed
 import csv
-import pandas as pd
+from geojson import FeatureCollection, Feature, Point
+
+from velocity.gtfs import GTFSManager
 
 
 # Create your views here.
@@ -25,6 +26,23 @@ class GeoJSONViewSet(generics.GenericAPIView):
         shapes_json = shapes_to_geojson()
 
         return JsonResponse(shapes_json, safe=False)
+
+
+class GTFSStopsViewSet(generics.GenericAPIView):
+    permission_classes = [AllowAny]
+
+    def get(self, request):
+        gtfs_manager = GTFSManager()
+        stops = gtfs_manager.stops_reader.load_csv_file_as_df()
+        stopsFeatureCollection = []
+        for idx, stop in stops.iterrows():
+            stop_lat = stop['stop_lat']
+            stop_lon = stop['stop_lon']
+            stopsFeatureCollection.append(
+                Feature(geometry=Point(coordinates=[stop_lon, stop_lat]))
+            )
+        stopsFeatureCollection = FeatureCollection(stopsFeatureCollection)
+        return JsonResponse(stopsFeatureCollection, safe=False)
 
 
 class ShapeViewSet(viewsets.ModelViewSet):
@@ -76,6 +94,28 @@ class HistoricSpeedViewSet(viewsets.ModelViewSet):
     permission_classes = [AllowAny]
     serializer_class = HistoricSpeedSerializer
     queryset = HistoricSpeed.objects.all().order_by("segment")
+
+
+class StopViewSet(viewsets.ModelViewSet):
+    permission_classes = [AllowAny]
+    serializer_class = StopSerializer
+    queryset = Stop.objects.all()
+
+    def to_geojson(self, request, *args, **kwargs):
+        stops = self.get_queryset()
+        stops_feature_collection = []
+        for stop in stops:
+            stops_feature_collection.append(
+                Feature(
+                    geometry=Point(coordinates=[stop.longitude, stop.latitude]),
+                    properties={
+                        "shape_pk": stop.segment.shape.pk,
+                        "segment_pk": stop.segment.sequence
+                    }
+                )
+            )
+        stops_feature_collection = FeatureCollection(stops_feature_collection)
+        return JsonResponse(stops_feature_collection, safe=False)
 
 
 class GTFSShapeViewSet(viewsets.ModelViewSet):
