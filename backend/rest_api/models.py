@@ -138,6 +138,7 @@ class HistoricSpeed(models.Model):
 # TODO: Create alert
 class Alert(models.Model):
     timestamp = models.DateTimeField()
+    temporal_segment = models.IntegerField()
     voted_positive = models.IntegerField()
     voted_negative = models.IntegerField()
     detected_speed = models.ForeignKey(Speed, on_delete=models.CASCADE)
