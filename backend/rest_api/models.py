@@ -87,6 +87,7 @@ class Segment(models.Model):
             try:
                 historic_speed = HistoricSpeed.objects.get(segment=self, day_type=speed.day_type,
                                                            temporal_segment=speed.temporal_segment)
+
             except HistoricSpeed.DoesNotExist:
                 properties["historic_speed"] = "Sin registro"
             else:
@@ -104,6 +105,12 @@ class Segment(models.Model):
             properties=properties
         )
         return feature
+
+    def get_stops(self):
+        stops_query = Stop.objects.get(segment=self)
+        if stops_query.count() == 0:
+            return []
+        return [stop.pk for stop in stops_query]
 
 
 class Stop(models.Model):
@@ -138,7 +145,7 @@ class HistoricSpeed(models.Model):
 # TODO: Create alert
 class Alert(models.Model):
     timestamp = models.DateTimeField()
-    temporal_segment = models.IntegerField()
+    temporal_segment = models.IntegerField(default=0)
     voted_positive = models.IntegerField()
     voted_negative = models.IntegerField()
     detected_speed = models.ForeignKey(Speed, on_delete=models.CASCADE)

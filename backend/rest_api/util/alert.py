@@ -5,6 +5,45 @@ from decouple import config
 logger = logging.getLogger(__name__)
 
 
+class AlertForm:
+    def __init__(self, name, activated, message, stops, start, end, start_time_day, end_time_day, monday, tuesday,
+                 wednesday, thursday, friday, saturday, sunday):
+        self.name = name
+        self.activated = activated
+        self.message = message
+        self.stops = stops
+        self.start = start
+        self.end = end
+        self.start_time_day = start_time_day
+        self.end_time_day = end_time_day
+        self.monday = monday
+        self.tuesday = tuesday
+        self.wednesday = wednesday
+        self.thursday = tuesday
+        self.friday = friday
+        self.saturday = saturday
+        self.sunday = sunday
+
+    def get_alert(self):
+        return {
+            "name": self.name,
+            "activated": self.activated,
+            "message": self.message,
+            "stops": self.stops,
+            "start": self.start,
+            "end": self.end,
+            "start_time_day": self.start_time_day,
+            "end_time_day": self.end_time_day,
+            "monday": self.monday,
+            "tuesday": self.tuesday,
+            "wednesday": self.wednesday,
+            "thursday": self.thursday,
+            "friday": self.friday,
+            "saturday": self.saturday,
+            "sunday": self.sunday
+        }
+
+
 class TranSappSiteManager:
 
     def __init__(self):
@@ -36,5 +75,8 @@ class TranSappSiteManager:
 
         return req_session
 
-    def create_alert(self):
-        pass
+    def create_alert(self, alert: AlertForm):
+        alert_data = alert.get_alert()
+        self.session.post(self.CREATE_ALERT_URL, data=alert_data)
+
+
