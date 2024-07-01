@@ -14,6 +14,7 @@ import csv
 from geojson import FeatureCollection, Feature, Point
 
 from velocity.gtfs import GTFSManager
+from rest_framework.response import Response
 
 
 # Create your views here.
@@ -94,6 +95,38 @@ class HistoricSpeedViewSet(viewsets.ModelViewSet):
     permission_classes = [AllowAny]
     serializer_class = HistoricSpeedSerializer
     queryset = HistoricSpeed.objects.all().order_by("segment")
+
+    def get_queryset(self):
+        queryset = self.queryset
+        month = self.request.query_params.get("month")
+        day_type = self.request.query_params.get("dayType")
+        if month is not None:
+            month = int(month)
+            year = timezone.now().year
+            queryset = queryset.filter(timestamp__year=year, timestamp__month=month)
+        if day_type is not None:
+            queryset = queryset.filter(day_type=day_type)
+        queryset = queryset.order_by("segment", "temporal_segment")
+        return queryset
+
+    def list(self, request, *args, **kwargs):
+        queryset = self.get_queryset()
+        serializer = self.get_serializer(queryset, many=True)
+        response = {"results": serializer.data}
+        return Response(response)
+
+    def to_csv(self, request, *args, **kwargs):
+        queryset = self.get_queryset()
+        response = HttpResponse(content_type='text/csv')
+        response['Content-Disposition'] = 'attachment; filename="segment_speeds.csv"'
+        serializer = self.get_serializer(queryset, many=True)
+        fieldnames = ['shape', 'sequence', 'temporal_segment', 'day_type', 'speed']
+        writer = csv.DictWriter(response, fieldnames=fieldnames)
+        writer.writeheader()
+        for obj in serializer.data:
+            writer.writerow(obj)
+
+        return response
 
 
 class StopViewSet(viewsets.ModelViewSet):

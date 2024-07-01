@@ -24,9 +24,13 @@ class SpeedSerializer(serializers.ModelSerializer):
 
 
 class HistoricSpeedSerializer(serializers.ModelSerializer):
+    shape = serializers.IntegerField(source="segment.shape.id", read_only=True)
+    sequence = serializers.IntegerField(source="segment.sequence", read_only=True)
+
     class Meta:
         model = HistoricSpeed
-        fields = '__all__'
+        fields = ["shape", "sequence", "temporal_segment", "day_type", "speed"]
+
 
 class StopSerializer(serializers.ModelSerializer):
     class Meta:

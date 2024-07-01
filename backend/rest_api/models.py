@@ -7,6 +7,7 @@ from velocity.constants import DEG_PI, DEG_PI_HALF
 from processors.geometry.point import Point
 from django.utils import timezone
 from rest_api.vars import SPEED_COLOR_RANGES
+from gtfs_rt.utils import get_temporal_segment, get_day_type
 
 
 class Shape(models.Model):
@@ -75,26 +76,34 @@ class Segment(models.Model):
             previous_point = current_point
         return accum_distance
 
-    def to_geojson(self):
+    def to_geojson(self, use_temporal_segment=True):
         properties = {
             "shape_id": self.shape.pk,
             "sequence": self.sequence,
         }
-        speed: Speed = Speed.objects.filter(segment=self).order_by('-timestamp').first()
+        now = timezone.localtime()
+        temporal_segment = get_temporal_segment(now)
+        day_type = get_day_type(now)
+        speed_query = Speed.objects.filter(segment=self)
+        if use_temporal_segment:
+            speed = speed_query.filter(segment=self, temporal_segment=temporal_segment).first()
+        else:
+            speed: Speed = speed_query.order_by('-timestamp').first()
         if speed is not None:
             properties["speed"] = str(speed.speed)
             properties["color"] = speed.assign_color()
-            try:
-                historic_speed = HistoricSpeed.objects.get(segment=self, day_type=speed.day_type,
-                                                           temporal_segment=speed.temporal_segment)
-
-            except HistoricSpeed.DoesNotExist:
-                properties["historic_speed"] = "Sin registro"
-            else:
-                properties["historic_speed"] = historic_speed.speed
+            properties["temporal_segment"] = speed.temporal_segment
         else:
             properties["speed"] = "Sin registro"
             properties["color"] = "#DDDDDD"
+        try:
+            historic_speed = HistoricSpeed.objects.get(segment=self, day_type=day_type,
+                                                       temporal_segment=temporal_segment)
+        except HistoricSpeed.DoesNotExist:
+            properties["historic_speed"] = "Sin registro"
+        else:
+            properties["historic_speed"] = historic_speed.speed
+
         services = Services.objects.filter(segment=self).first()
         if services is not None:
             properties["services"] = services.services

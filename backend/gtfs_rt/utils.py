@@ -1,5 +1,6 @@
 import numpy as np
 from datetime import datetime
+import pytz
 
 MAD_CONST = 1.4826
 
@@ -20,3 +21,13 @@ def speed_threshold(x):
 def get_temporal_segment(date: datetime, interval: int = 15):
     day_minutes = date.hour * 60 + date.minute
     return int(day_minutes / interval)
+
+
+def get_day_type(dt: datetime, timezone: datetime.tzinfo = pytz.UTC):
+    if dt.tzinfo is None:
+        raise ValueError("datetime instance must have a tzinfo")
+    converted_timestamp = dt.astimezone(timezone)
+    weekday = converted_timestamp.weekday()
+    day_type = 'L' if weekday < 5 else 'S' if weekday == 5 else 'D'
+
+    return day_type

@@ -2,23 +2,35 @@ from rest_api.models import Speed, HistoricSpeed, Segment
 from datetime import datetime, timedelta
 from django.db.models import Avg
 from django.utils import timezone
+from django.db.models import Func
+
+
+class Round2(Func):
+    function = "ROUND"
+    template = "%(function)s(%(expressions)s::numeric, 2)"
+
+
+def flush_historic_speeds():
+    HistoricSpeed.objects.all().delete()
 
 
 def get_last_month_avg_speed():
+    # flush_historic_speeds()
     now = timezone.now()
     yesterday = now - timedelta(days=1)
     last_month = yesterday.month
     last_year = yesterday.year
 
     last_month_speeds = Speed.objects.filter(timestamp__year=last_year, timestamp__month=last_month)
-    avg_speeds = last_month_speeds.values("segment", "day_type", "temporal_segment").annotate(
-        average_segment_speed=Avg("speed")).order_by("segment", "day_type", "temporal_segment")
+    avg_speeds = last_month_speeds.values("segment", "day_type", "temporal_segment", "timestamp").annotate(
+        average_segment_speed=Round2(Avg("speed"))).order_by("segment", "day_type", "temporal_segment")
     for historic_speed in avg_speeds:
         historic_speed_data = {
             "segment": Segment.objects.get(pk=historic_speed["segment"]),
             "speed": historic_speed["average_segment_speed"],
             "day_type": historic_speed["day_type"],
-            "temporal_segment": historic_speed["temporal_segment"]
+            "temporal_segment": historic_speed["temporal_segment"],
+            "timestamp": yesterday
         }
         HistoricSpeed.objects.create(**historic_speed_data)
 

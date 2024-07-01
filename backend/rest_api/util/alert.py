@@ -19,7 +19,7 @@ class AlertForm:
         self.monday = monday
         self.tuesday = tuesday
         self.wednesday = wednesday
-        self.thursday = tuesday
+        self.thursday = thursday
         self.friday = friday
         self.saturday = saturday
         self.sunday = sunday
