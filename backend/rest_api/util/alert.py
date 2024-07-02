@@ -50,7 +50,7 @@ class TranSappSiteManager:
         self.server_name = 'https://{0}'.format(config('TRANSAPP_HOST'))
         self.server_username = config('TRANSAPP_SITE_USERNAME')
         # urls
-        self.LOGIN_URL = '{0}/user/login/'.format(self.server_name)
+        self.LOGIN_URL = '{0}/login/?next=/'.format(self.server_name)
         self.CREATE_ALERT_URL = '{0}/alert/add/'.format(self.server_name)
 
         self.session = self.get_logged_session()
@@ -78,5 +78,3 @@ class TranSappSiteManager:
     def create_alert(self, alert: AlertForm):
         alert_data = alert.get_alert()
         self.session.post(self.CREATE_ALERT_URL, data=alert_data)
-
-
