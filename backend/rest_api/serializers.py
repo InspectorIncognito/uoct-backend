@@ -1,5 +1,5 @@
 from rest_framework import serializers
-from rest_api.models import Shape, Segment, GTFSShape, Services, Speed
+from rest_api.models import Shape, Segment, GTFSShape, Services, Speed, HistoricSpeed, Stop
 
 
 class ShapeSerializer(serializers.ModelSerializer):
@@ -20,7 +20,22 @@ class SpeedSerializer(serializers.ModelSerializer):
 
     class Meta:
         model = Speed
-        fields = ['shape', 'sequence', 'speed', 'timestamp', 'day_type']
+        fields = ['shape', 'sequence', 'speed', 'timestamp', 'day_type', 'temporal_segment']
+
+
+class HistoricSpeedSerializer(serializers.ModelSerializer):
+    shape = serializers.IntegerField(source="segment.shape.id", read_only=True)
+    sequence = serializers.IntegerField(source="segment.sequence", read_only=True)
+
+    class Meta:
+        model = HistoricSpeed
+        fields = ["shape", "sequence", "temporal_segment", "day_type", "speed"]
+
+
+class StopSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = Stop
+        fields = '__all__'
 
 
 class ServicesSerializer(serializers.ModelSerializer):

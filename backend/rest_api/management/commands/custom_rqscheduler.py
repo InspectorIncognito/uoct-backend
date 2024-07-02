@@ -4,6 +4,7 @@ from django.conf import settings
 from gtfs_rt.processors.speed import calculate_speed
 from gtfs_rt.processors.proto import download_proto_data
 from django_rq.management.commands import rqscheduler
+from processors.speed.avg_speed import get_last_month_avg_speed
 
 scheduler = django_rq.get_scheduler(settings.CRONLIKE_QUEUE)
 logger = logging.getLogger(__name__)
@@ -32,8 +33,16 @@ def register_scheduled_jobs():
         func=calculate_speed,  # Function to be queued
         args=[],  # Arguments passed into function when executed
         queue_name=settings.CRONLIKE_QUEUE,  # In which queue the job should be put in
-        repeat=None,  # Repeat this number of times (None means repeat forever
+        repeat=None,  # Repeat this number of times (None means repeat forever)
         use_local_timezone=False  # Interpret hours in the local timezone
+    )
+    scheduler.cron(
+        "0 0 1 * *",  # at 00:00 every day-of-month 1
+        func=get_last_month_avg_speed,  # Function to be queued
+        args=[],  # Arguments passed into function when executed
+        queue_name=settings.CRONLIKE_QUEUE,  # In which queue the job should be put in
+        repeat=None,  # Repeat this number of times (None means repeat forever)
+        use_local_timezone=False
     )
 
 

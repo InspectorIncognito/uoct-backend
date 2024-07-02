@@ -56,7 +56,9 @@ class ShapeTest(GeometryTestCase):
                     properties={
                         "shape_id": segment.shape.pk,
                         "sequence": segment.sequence,
-                        "color": "#DDDDDD"
+                        "color": "#DDDDDD",
+                        "speed": "Sin registro",
+                        "historic_speed": "Sin registro"
                     }
                 )
             )
@@ -137,7 +139,9 @@ class SegmentTest(GeometryTestCase):
                     properties={
                         "shape_id": segment.shape.pk,
                         "sequence": segment.sequence,
-                        "color": "#DDDDDD"
+                        "color": "#DDDDDD",
+                        "speed": "Sin registro",
+                        "historic_speed": "Sin registro"
                     }
                 )
             )

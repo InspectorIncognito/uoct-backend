@@ -7,6 +7,7 @@ from velocity.constants import DEG_PI, DEG_PI_HALF
 from processors.geometry.point import Point
 from django.utils import timezone
 from rest_api.vars import SPEED_COLOR_RANGES
+from gtfs_rt.utils import get_temporal_segment, get_day_type
 
 
 class Shape(models.Model):
@@ -51,15 +52,6 @@ class Shape(models.Model):
         for segment in segments:
             distance = segment.get_distance()
             total_distance += distance
-            coords = segment.geometry
-            previous_point = None
-            for coord in coords:
-                current_point = Point(coord[0], coord[1])
-                if previous_point is None:
-                    previous_point = Point(coord[0], coord[1])
-                    continue
-                distance = previous_point.distance(current_point, algorithm='haversine')
-                total_distance += distance
         return int(total_distance)
 
     def __str__(self):
@@ -84,17 +76,34 @@ class Segment(models.Model):
             previous_point = current_point
         return accum_distance
 
-    def to_geojson(self):
+    def to_geojson(self, use_temporal_segment=True):
         properties = {
             "shape_id": self.shape.pk,
             "sequence": self.sequence,
         }
-        speed: Speed = Speed.objects.filter(segment=self).order_by('-timestamp').first()
-        if speed is not None:
-            properties["speed"] = speed.speed
-            properties["color"] = speed.assign_color()
+        now = timezone.localtime()
+        temporal_segment = get_temporal_segment(now)
+        day_type = get_day_type(now)
+        speed_query = Speed.objects.filter(segment=self)
+        if use_temporal_segment:
+            speed = speed_query.filter(segment=self, temporal_segment=temporal_segment).first()
         else:
+            speed: Speed = speed_query.order_by('-timestamp').first()
+        if speed is not None:
+            properties["speed"] = str(speed.speed)
+            properties["color"] = speed.assign_color()
+            properties["temporal_segment"] = speed.temporal_segment
+        else:
+            properties["speed"] = "Sin registro"
             properties["color"] = "#DDDDDD"
+        try:
+            historic_speed = HistoricSpeed.objects.get(segment=self, day_type=day_type,
+                                                       temporal_segment=temporal_segment)
+        except HistoricSpeed.DoesNotExist:
+            properties["historic_speed"] = "Sin registro"
+        else:
+            properties["historic_speed"] = historic_speed.speed
+
         services = Services.objects.filter(segment=self).first()
         if services is not None:
             properties["services"] = services.services
@@ -106,12 +115,26 @@ class Segment(models.Model):
         )
         return feature
 
+    def get_stops(self):
+        stops_query = Stop.objects.get(segment=self)
+        if stops_query.count() == 0:
+            return []
+        return [stop.pk for stop in stops_query]
+
+
+class Stop(models.Model):
+    segment = models.ForeignKey(Segment, on_delete=models.CASCADE)
+    stop_id = models.CharField(max_length=128)
+    latitude = models.FloatField()
+    longitude = models.FloatField()
+
 
 class Speed(models.Model):
     segment = models.ForeignKey(Segment, on_delete=models.CASCADE)
     speed = models.FloatField(blank=False, null=False)
     timestamp = models.DateTimeField(default=timezone.localtime)
     day_type = models.CharField(max_length=1, blank=False, null=False, default="L")
+    temporal_segment = models.IntegerField(blank=False, null=False, default=0)
 
     def assign_color(self):
         for min_speed, max_speed, color in SPEED_COLOR_RANGES:
@@ -123,13 +146,15 @@ class Speed(models.Model):
 class HistoricSpeed(models.Model):
     segment = models.ForeignKey(Segment, on_delete=models.CASCADE)
     speed = models.FloatField(blank=False, null=False)
-    timestamp = models.DateTimeField(default=timezone.localtime)
     day_type = models.CharField(max_length=1, blank=False, null=False, default="L")
+    temporal_segment = models.IntegerField(blank=False, null=False, default=0)
+    timestamp = models.DateTimeField(default=timezone.localtime)
 
 
 # TODO: Create alert
 class Alert(models.Model):
     timestamp = models.DateTimeField()
+    temporal_segment = models.IntegerField(default=0)
     voted_positive = models.IntegerField()
     voted_negative = models.IntegerField()
     detected_speed = models.ForeignKey(Speed, on_delete=models.CASCADE)
