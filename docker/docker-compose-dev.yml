@@ -17,6 +17,7 @@ services:
       args:
         - GIT_PERSONAL_TOKEN=${GITHUB_TOKEN}
         - VUE_APP_BASE_URL=${VUE_APP_BASE_URL}
+        - VITE_MAPBOX_TOKEN=${VITE_MAPBOX_TOKEN}
     profiles: [ 'dev' ]
     ports:
       - "8080:80"
