@@ -2,6 +2,7 @@ FROM node:16-alpine3.11 as build-stage
 
 ARG GIT_PERSONAL_TOKEN
 ARG VUE_APP_BASE_URL
+ARG VITE_MAPBOX_TOKEN
 
 WORKDIR /app
 RUN apk update &&  \
@@ -16,6 +17,7 @@ RUN npm install
 RUN touch '.env.production' && \
   echo 'NODE_ENV=production' >> '.env.production' && \
   echo "VITE_BASE_URL=${VUE_APP_BASE_URL}" >> '.env.production' && \
+  echo "VITE_MAPBOX_TOKEN=${VITE_MAPBOX_TOKEN}" >> '.env.production' && \
   echo 'VITE_I18N_LOCALE=es' >> '.env.production' && \
   echo 'VITE_I18N_FALLBACK_LOCALE=en' >> '.env.production' && \
   echo 'VITE_I18N_SUPPORTED_LOCALE=en,es' >> '.env.production'
