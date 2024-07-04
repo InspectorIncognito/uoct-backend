@@ -90,19 +90,21 @@ class Segment(models.Model):
         else:
             speed: Speed = speed_query.order_by('-timestamp').first()
         if speed is not None:
-            properties["speed"] = str(speed.speed)
-            properties["color"] = speed.assign_color()
-            properties["temporal_segment"] = speed.temporal_segment
+            alert = Alert.objects.filter(segment=self, temporal_segment=speed.temporal_segment).first()
+            if alert is not None:
+                properties['alert_id'] = alert.pk
+            speed_info = speed.check_value()
+            properties.update(speed_info)
         else:
+            historic_speed = (HistoricSpeed.objects.filter(segment=self, day_type=day_type,
+                                                           temporal_segment=temporal_segment)
+                              .order_by("-timestamp").first())
+            if historic_speed is not None:
+                properties["historic_speed"] = historic_speed.speed
+            else:
+                properties["historic_speed"] = "Sin registro"
             properties["speed"] = "Sin registro"
             properties["color"] = "#DDDDDD"
-        try:
-            historic_speed = HistoricSpeed.objects.get(segment=self, day_type=day_type,
-                                                       temporal_segment=temporal_segment)
-        except HistoricSpeed.DoesNotExist:
-            properties["historic_speed"] = "Sin registro"
-        else:
-            properties["historic_speed"] = historic_speed.speed
 
         services = Services.objects.filter(segment=self).first()
         if services is not None:
@@ -119,7 +121,7 @@ class Segment(models.Model):
         stops_query = Stop.objects.get(segment=self)
         if stops_query.count() == 0:
             return []
-        return [stop.pk for stop in stops_query]
+        return [stop.stop_id for stop in stops_query]
 
 
 class Stop(models.Model):
@@ -142,6 +144,22 @@ class Speed(models.Model):
                 return color
         return "#000000"
 
+    def check_value(self):
+        geojson_data = dict()
+        geojson_data["speed"] = self.speed
+        geojson_data["color"] = self.assign_color()
+        geojson_data["temporal_segment"] = self.temporal_segment
+        historic_speed: HistoricSpeed = HistoricSpeed.objects.filter(
+            segment=self.segment,
+            day_type=self.day_type,
+            temporal_segment=self.temporal_segment,
+        ).order_by("-timestamp").first()
+        if historic_speed is not None:
+            geojson_data["historic_speed"] = str(historic_speed.speed)
+        else:
+            geojson_data["historic_speed"] = "Sin registro"
+        return geojson_data
+
 
 class HistoricSpeed(models.Model):
     segment = models.ForeignKey(Segment, on_delete=models.CASCADE)
@@ -153,12 +171,12 @@ class HistoricSpeed(models.Model):
 
 # TODO: Create alert
 class Alert(models.Model):
-    timestamp = models.DateTimeField()
-    temporal_segment = models.IntegerField(default=0)
-    voted_positive = models.IntegerField()
-    voted_negative = models.IntegerField()
-    detected_speed = models.ForeignKey(Speed, on_delete=models.CASCADE)
     segment = models.ForeignKey(Segment, on_delete=models.CASCADE)
+    detected_speed = models.ForeignKey(Speed, on_delete=models.CASCADE)
+    temporal_segment = models.IntegerField(default=0)
+    voted_positive = models.IntegerField(default=0)
+    voted_negative = models.IntegerField(default=0)
+    timestamp = models.DateTimeField(default=timezone.localtime)
 
 
 class Services(models.Model):

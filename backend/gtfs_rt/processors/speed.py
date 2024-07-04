@@ -75,7 +75,7 @@ def calculate_speed(start_date: datetime.datetime = None, end_date: datetime.dat
             print(f"Segment {sequence} from shape {shape_id} does not exists")
             continue
         else:
-            temporal_segment = get_temporal_segment(end_date)
+            temporal_segment = get_temporal_segment(start_date)
             speed_data = {
                 "segment": segment,
                 "speed": data['speed(km/h)'],
