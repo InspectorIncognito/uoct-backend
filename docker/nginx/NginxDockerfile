@@ -10,7 +10,7 @@ RUN apk update &&  \
     apk add --no-cache git && \
     git config --global url."https://${GIT_PERSONAL_TOKEN}:@github.com/".insteadOf "https://github.com/"
 # TODO: replace repository url of ui project
-RUN git clone https://github.com/InspectorIncognito/uoct-frontend.git && \
+RUN git clone --branch v1.0.0 https://github.com/InspectorIncognito/uoct-frontend.git && \
     cp -r uoct-frontend/. . && \
     rm -r uoct-frontend
 RUN npm install

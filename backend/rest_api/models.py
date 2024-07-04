@@ -82,7 +82,7 @@ class Segment(models.Model):
             "sequence": self.sequence,
         }
         now = timezone.localtime()
-        temporal_segment = get_temporal_segment(now)
+        temporal_segment = get_temporal_segment(now)-1
         day_type = get_day_type(now)
         speed_query = Speed.objects.filter(segment=self)
         if use_temporal_segment:
