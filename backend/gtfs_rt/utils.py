@@ -1,6 +1,7 @@
 import numpy as np
 from datetime import datetime
 import pytz
+from gtfs_rt.models import GPSPulse
 
 MAD_CONST = 1.4826
 
@@ -31,3 +32,8 @@ def get_day_type(dt: datetime, timezone: datetime.tzinfo = pytz.UTC):
     day_type = 'L' if weekday < 5 else 'S' if weekday == 5 else 'D'
 
     return day_type
+
+
+def flush_gps_pulses():
+    print("Calling flush_gps_pulses...")
+    GPSPulse.objects.all().delete()
