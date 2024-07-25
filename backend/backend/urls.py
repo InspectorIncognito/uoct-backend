@@ -29,6 +29,7 @@ urlpatterns = [
     path('api/gps/', include(('gps.urls', 'gps'), namespace='gps')),
     path('api/geo/', include(('rest_api.urls', 'geo'), namespace='geo')),
     path('api/gtfs_rt/', include(('gtfs_rt.routers', 'gtfs_rt'), namespace='gtfs_rt')),
+    path('api/', include(('rest_api.routers', 'alert-threshold'), namespace='alert-threshold'))
 ]
 
 urlpatterns += [

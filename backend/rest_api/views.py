@@ -1,14 +1,14 @@
 from datetime import datetime
 
 from django.utils import timezone
-from rest_framework import viewsets
+from rest_framework import viewsets, mixins
 from django.http import JsonResponse, HttpResponse
 from rest_framework import generics
 from rest_framework.permissions import AllowAny
 from processors.models.shapes import shapes_to_geojson
-from rest_api.models import Shape, Segment, GTFSShape, Services, Speed, HistoricSpeed, Stop
+from rest_api.models import Shape, Segment, GTFSShape, Services, Speed, HistoricSpeed, Stop, AlertThreshold
 from rest_api.serializers import ShapeSerializer, SegmentSerializer, GTFSShapeSerializer, ServicesSerializer, \
-    SpeedSerializer, HistoricSpeedSerializer, StopSerializer
+    SpeedSerializer, HistoricSpeedSerializer, StopSerializer, AlertThresholdSerializer
 from gtfs_rt.processors.speed import calculate_speed
 import csv
 from geojson import FeatureCollection, Feature, Point
@@ -179,3 +179,10 @@ class GridViewSet(generics.GenericAPIView):
     def get(self, request):
         speed_records = calculate_speed()
         return JsonResponse({"speeds": speed_records})
+
+
+class AlertThresholdViewSet(viewsets.GenericViewSet, mixins.ListModelMixin, mixins.UpdateModelMixin,
+                            mixins.CreateModelMixin, mixins.RetrieveModelMixin):
+    permission_classes = [AllowAny, ]
+    queryset = AlertThreshold.objects.all()
+    serializer_class = AlertThresholdSerializer

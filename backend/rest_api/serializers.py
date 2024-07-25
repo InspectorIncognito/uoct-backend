@@ -1,5 +1,5 @@
 from rest_framework import serializers
-from rest_api.models import Shape, Segment, GTFSShape, Services, Speed, HistoricSpeed, Stop
+from rest_api.models import Shape, Segment, GTFSShape, Services, Speed, HistoricSpeed, Stop, AlertThreshold
 
 
 class ShapeSerializer(serializers.ModelSerializer):
@@ -48,3 +48,9 @@ class GTFSShapeSerializer(serializers.ModelSerializer):
     class Meta:
         model = GTFSShape
         fields = ['shape_id', 'direction']
+
+
+class AlertThresholdSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = AlertThreshold
+        fields = '__all__'
