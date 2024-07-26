@@ -14,5 +14,7 @@ class Command(BaseCommand):
         call_command('get_gtfs_shapes')
         # Assign services to segments
         call_command('assign_routes_to_segments')
+        # Set alert threshold value
+        call_command('set_alert_threshold')
 
         print("initialize_map_data finished.")

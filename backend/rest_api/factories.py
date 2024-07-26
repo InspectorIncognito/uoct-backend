@@ -1,7 +1,7 @@
 import datetime
 
 import factory
-from rest_api.models import Speed, Shape, Segment
+from rest_api.models import Speed, Shape, Segment, HistoricSpeed, Stop
 from random import randint
 import numpy as np
 from django.utils import timezone
@@ -20,12 +20,25 @@ class SegmentFactory(factory.django.DjangoModelFactory):
     geometry = [[0.0, 0.0], [0.0, 0.1], [1.0, 1.0]]
 
 
+class StopFactory(factory.django.DjangoModelFactory):
+    class Meta:
+        model = Stop
+
+    segment = factory.SubFactory(SegmentFactory)
+    latitude = factory.Faker('latitude')
+    longitude = factory.Faker('longitude')
+
 class SpeedFactory(factory.django.DjangoModelFactory):
     class Meta:
         model = Speed
 
     segment = factory.SubFactory(SegmentFactory)
     day_type = "L"
+
+
+class HistoricSpeedFactory(SpeedFactory):
+    class Meta:
+        model = HistoricSpeed
 
 
 def create_speed_dataset(segment_n: int = 5, speed_n: int = 10):

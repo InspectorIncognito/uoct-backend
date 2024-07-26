@@ -118,7 +118,7 @@ class Segment(models.Model):
         return feature
 
     def get_stops(self):
-        stops_query = Stop.objects.get(segment=self)
+        stops_query = Stop.objects.filter(segment=self)
         if stops_query.count() == 0:
             return []
         return [stop.stop_id for stop in stops_query]
@@ -185,7 +185,7 @@ class SingletonModel(models.Model):
         super(SingletonModel, self).save(*args, **kwargs)
 
     @classmethod
-    def load(cls):
+    def load(cls, *args, **kwargs):
         """
         Load object from the database. Failing that, create a new empty
         (default) instance of the object and return it (without saving it
@@ -193,7 +193,7 @@ class SingletonModel(models.Model):
         """
 
         try:
-            return cls.objects.get()
+            return cls.objects.get(*args, **kwargs)
         except cls.DoesNotExist:
             return cls()
 
