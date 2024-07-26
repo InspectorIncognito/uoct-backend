@@ -23,8 +23,9 @@ class GeoJSONViewSet(generics.GenericAPIView):
 
     def get(self, request):
         # Returns a GeoJSON with the latest data.
-        # This includes the 500-meter-segmented-path with its corresponding velocities
-        shapes_json = shapes_to_geojson()
+        # This includes the 500-meter-segmented-path with its corresponding speeds
+        now = timezone.localtime()
+        shapes_json = shapes_to_geojson(now)
 
         return JsonResponse(shapes_json, safe=False)
 

@@ -42,6 +42,7 @@ class GTFSRTManager:
 
     @staticmethod
     def save_gtfs_rt_to_db(feed: gtfs_realtime_pb2.FeedMessage):
+        created = 0
         for entity in feed.entity:
             if entity.HasField('vehicle'):
                 if entity.vehicle.HasField('trip') and entity.vehicle.HasField('vehicle'):
@@ -58,6 +59,8 @@ class GTFSRTManager:
                         license_plate=license_plate,
                         timestamp=datetime.datetime.fromtimestamp(timestamp).astimezone(timezone.get_current_timezone())
                     )
+                    created += 1
+        print("Created {} GPS".format(created))
 
     def run_process(self):
         raw_data = self.download_raw_gtfs_rt_data()

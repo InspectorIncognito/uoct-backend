@@ -1,6 +1,8 @@
 from django.core.management import BaseCommand, CommandError
 from gtfs_rt.processors.speed import calculate_speed
 from rest_api.models import Shape, Segment
+from django.utils import timezone
+
 
 class Command(BaseCommand):
     help = 'Calculate speed for all segments of each shape in a range of time.'
@@ -22,4 +24,5 @@ class Command(BaseCommand):
             raise CommandError("No shapes found")
         elif Segment.objects.count() == 0:
             raise Exception("No segments found")
-        calculate_speed()
+        now = timezone.localtime()
+        calculate_speed(now)

@@ -53,7 +53,8 @@ class GridManager(Dict[Tuple[int, int], GridCell]):
             "longitude__lte": grid_max_lon
         }
         return GPSPulse.objects.filter(**filter_query).values(
-            "route_id", "direction_id",
+            "route_id",
+            "direction_id",
             "license_plate",
             "latitude",
             "longitude",

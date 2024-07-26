@@ -43,10 +43,13 @@ class VehicleManager:
         vehicle_data = VehicleData(self.grid_manager, license_plate=license_plate)
         if vehicle_data not in self.vehicles:
             self.vehicles[vehicle_data] = vehicle_data
-
+            print(f"Created {self.vehicles[vehicle_data]} ", end='')
+        else:
+            print(f"Adding to {self.vehicles[vehicle_data]} ", end='')
         try:
             route_id = str(gps_pulse["route_id"]) + ("I" if gps_pulse["direction_id"] == 0 else "R")
             shape_id = get_shape_by_route_id(self.services, route_id)
+            print(f"route: {route_id}. shape: {shape_id} ", end='')
             if shape_id is None:
                 self.gps_ignored += 1
                 raise ValueError(f"Skipping GPS pulse for route {route_id}.")

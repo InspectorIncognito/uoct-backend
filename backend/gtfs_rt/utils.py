@@ -24,6 +24,14 @@ def get_temporal_segment(date: datetime, interval: int = 15):
     return int(day_minutes / interval)
 
 
+def get_last_temporal_segment(date: datetime, interval: int = 15):
+    temporal_segment = get_temporal_segment(date, interval)
+    max_temporal_segment = int(1439 / 15)
+    if temporal_segment == 0:
+        return max_temporal_segment
+    return temporal_segment - 1
+
+
 def get_day_type(dt: datetime, timezone: datetime.tzinfo = pytz.UTC):
     if dt.tzinfo is None:
         raise ValueError("datetime instance must have a tzinfo")

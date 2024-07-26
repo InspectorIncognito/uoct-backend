@@ -1,3 +1,5 @@
+from datetime import timedelta, datetime
+
 from django.contrib.postgres.fields import ArrayField
 from django.db import models
 from shapely.geometry import LineString as shp_LineString
@@ -39,11 +41,11 @@ class Shape(models.Model):
     def get_bbox(self):
         return [self.grid_min_lon, self.grid_min_lat, self.grid_max_lon, self.grid_max_lat]
 
-    def to_geojson(self):
+    def to_geojson(self, now: datetime = timezone.localtime()):
         segments = Segment.objects.filter(shape=self).all()
         if len(segments) == 0:
             return {}
-        geojson = [segment.to_geojson() for segment in segments]
+        geojson = [segment.to_geojson(now) for segment in segments]
         return geojson
 
     def get_distance(self):
@@ -76,39 +78,37 @@ class Segment(models.Model):
             previous_point = current_point
         return accum_distance
 
-    def to_geojson(self, use_temporal_segment=True):
+    def to_geojson(self, now: datetime = timezone.localtime()):
+        delta = timedelta(minutes=15)
+        start_time = now - delta
+        last_temporal_segment = get_temporal_segment(start_time)
+        day_type = get_day_type(start_time)
+        print(start_time)
         properties = {
             "shape_id": self.shape.pk,
             "sequence": self.sequence,
         }
-        now = timezone.localtime()
-        temporal_segment = get_temporal_segment(now) - 1
-        day_type = get_day_type(now)
-        speed_query = Speed.objects.filter(segment=self)
-        if use_temporal_segment:
-            speed = speed_query.filter(segment=self, temporal_segment=temporal_segment).first()
+
+        speed = Speed.objects.filter(segment=self, temporal_segment=last_temporal_segment,
+                                     day_type=day_type).order_by("-timestamp").first()
+
+        if speed is None:
+            properties["speed"] = "Sin registro"
+            properties["color"] = "#DDD"
         else:
-            speed: Speed = speed_query.order_by('-timestamp').first()
-        if speed is not None:
-            alert = Alert.objects.filter(segment=self, temporal_segment=speed.temporal_segment).first()
-            if alert is not None:
-                properties['alert_id'] = alert.pk
             speed_info = speed.check_value()
             properties.update(speed_info)
+        historic_speed = HistoricSpeed.objects.filter(segment=self, temporal_segment=last_temporal_segment,
+                                                      day_type=day_type).order_by("-timestamp").first()
+        if historic_speed is None:
+            properties["historic_speed"] = "Sin registro"
         else:
-            historic_speed = (HistoricSpeed.objects.filter(segment=self, day_type=day_type,
-                                                           temporal_segment=temporal_segment)
-                              .order_by("-timestamp").first())
-            if historic_speed is not None:
-                properties["historic_speed"] = historic_speed.speed
-            else:
-                properties["historic_speed"] = "Sin registro"
-            properties["speed"] = "Sin registro"
-            properties["color"] = "#DDDDDD"
+            properties["historic_speed"] = historic_speed.speed
 
         services = Services.objects.filter(segment=self).first()
         if services is not None:
             properties["services"] = services.services
+
         line = shp_LineString(coordinates=self.geometry)
         line = line.simplify(tolerance=0.00001)
         feature = Feature(
