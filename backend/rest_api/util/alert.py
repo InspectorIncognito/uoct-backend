@@ -6,7 +6,7 @@ from decouple import config
 from datetime import timedelta
 from django.utils import timezone
 
-from rest_api.models import Segment, Speed, HistoricSpeed, Alert
+from rest_api.models import Segment, Speed, HistoricSpeed, Alert, AlertThreshold
 from gtfs_rt.utils import get_temporal_segment, get_day_type
 
 logger = logging.getLogger(__name__)
@@ -81,38 +81,49 @@ def create_alert_data(stops: List[str]):
     return alert_data
 
 
-def send_alerts():
-    print("Calling send_alerts...")
+def create_alerts():
+    print("Calling create_alerts...")
     now = timezone.localtime()
-    now = now.replace(second=0, microsecond=0)
+    end_time = now.replace(second=0, microsecond=0)
     delta = timedelta(minutes=15)
-    site_manager = TranSappSiteManager()
 
-    start_time = now - delta
+    start_time = end_time - delta
     day_type = get_day_type(start_time)
     temporal_segment = get_temporal_segment(start_time)
-
     segments = Segment.objects.all()
+    alert_threshold = AlertThreshold.objects.first().threshold
+
     for segment in segments:
-        speed = Speed.objects.filter(segment=segment, temporal_segment=temporal_segment,
-                                     day_type=day_type).order_by("-timestamp").first()
+        speed = Speed.objects.filter(segment=segment, day_type=day_type, temporal_segment=temporal_segment,
+                                     timestamp__gte=start_time, timestamp__lte=end_time).first()
         if speed is None:
             continue
-        historic_speed = HistoricSpeed.objects.filter(segment=segment, temporal_segment=temporal_segment,
-                                                      day_type=day_type).order_by("-timestamp").first()
+        historic_speed = HistoricSpeed.objects.filter(segment=segment, day_type=day_type,
+                                                      temporal_segment=temporal_segment).order_by("-timestamp").first()
         if historic_speed is None:
             continue
-
-        alert_condition = 2 * speed < historic_speed
+        speed_value = speed.speed
+        historic_speed_value = historic_speed.speed
+        alert_condition = alert_threshold * speed_value < historic_speed_value
         if alert_condition:
-            stops = segment.get_stops()
-            alert_data = create_alert_data(stops)
-            site_manager.create_alert(alert_data)
-
             alert_obj_data = {
                 "segment": segment,
                 "detected_speed": speed,
                 "temporal_segment": temporal_segment
             }
-            alert = Alert.objects.create(**alert_obj_data)
-            print(f"Alert object created: {alert}")
+            Alert.objects.create(**alert_obj_data)
+
+
+def send_alerts():
+    print("Calling send_alerts...")
+    end_time = timezone.localtime()
+    delta = timedelta(minutes=15)
+    start_time = end_time - delta
+    site_manager = TranSappSiteManager()
+
+    alerts = Alert.objects.filter(timestamp__gte=start_time, timestamp__lte=end_time)
+    for alert in alerts:
+        segment = alert.segment
+        stops = segment.get_stops()
+        alert_data = create_alert_data(stops)
+        site_manager.create_alert(alert_data)

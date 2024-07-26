@@ -82,7 +82,7 @@ class Segment(models.Model):
             "sequence": self.sequence,
         }
         now = timezone.localtime()
-        temporal_segment = get_temporal_segment(now)-1
+        temporal_segment = get_temporal_segment(now) - 1
         day_type = get_day_type(now)
         speed_query = Speed.objects.filter(segment=self)
         if use_temporal_segment:
@@ -118,7 +118,7 @@ class Segment(models.Model):
         return feature
 
     def get_stops(self):
-        stops_query = Stop.objects.get(segment=self)
+        stops_query = Stop.objects.filter(segment=self)
         if stops_query.count() == 0:
             return []
         return [stop.stop_id for stop in stops_query]
@@ -170,6 +170,38 @@ class HistoricSpeed(models.Model):
 
 
 # TODO: Create alert
+
+class SingletonModel(models.Model):
+    class Meta:
+        abstract = True
+
+    def save(self, *args, **kwargs):
+        """
+        Save object to the database. Removes all other entries if there
+        are any.
+        """
+        self.__class__.objects.exclude(id=self.id).delete()
+        self.pk = 1
+        super(SingletonModel, self).save(*args, **kwargs)
+
+    @classmethod
+    def load(cls, *args, **kwargs):
+        """
+        Load object from the database. Failing that, create a new empty
+        (default) instance of the object and return it (without saving it
+        to the database).
+        """
+
+        try:
+            return cls.objects.get(*args, **kwargs)
+        except cls.DoesNotExist:
+            return cls()
+
+
+class AlertThreshold(SingletonModel):
+    threshold = models.FloatField(blank=False, null=False, default=2)
+
+
 class Alert(models.Model):
     segment = models.ForeignKey(Segment, on_delete=models.CASCADE)
     detected_speed = models.ForeignKey(Speed, on_delete=models.CASCADE)
