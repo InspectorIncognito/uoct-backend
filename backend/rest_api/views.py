@@ -91,7 +91,7 @@ class SpeedViewSet(viewsets.ModelViewSet):
         return response
 
 
-class HistoricSpeedViewSet(viewsets.ModelViewSet):
+class HistoricSpeedViewSet(viewsets.ModelViewSet, mixins.ListModelMixin):
     permission_classes = [AllowAny]
     serializer_class = HistoricSpeedSerializer
     queryset = HistoricSpeed.objects.all().order_by("segment")
@@ -106,14 +106,8 @@ class HistoricSpeedViewSet(viewsets.ModelViewSet):
             queryset = queryset.filter(timestamp__year=year, timestamp__month=month)
         if day_type is not None:
             queryset = queryset.filter(day_type=day_type)
-        queryset = queryset.order_by("segment", "temporal_segment")
+        queryset = queryset.order_by("segment", "temporal_segment", "temporal_segment")
         return queryset
-
-    def list(self, request, *args, **kwargs):
-        queryset = self.get_queryset()
-        serializer = self.get_serializer(queryset, many=True)
-        response = {"results": serializer.data}
-        return Response(response)
 
     def to_csv(self, request, *args, **kwargs):
         queryset = self.get_queryset()
