@@ -1,4 +1,6 @@
 import json
+import uuid
+
 import requests
 import logging
 from typing import List
@@ -21,9 +23,12 @@ class TranSappSiteManager:
         self.server_username = config('TRANSAPP_SITE_USERNAME')
         # urls
         self.LOGIN_URL = '{0}/login/?next=/'.format(self.server_name)
-        self.CREATE_ALERT_URL = '{0}/adminapp/alert/add'.format(self.server_name)
-
+        self.ALERT_URL = '{0}/adminapp/alert'.format(self.server_name)
+        self.CREATE_ALERT_URL = "{0}/add".format(self.ALERT_URL)
         self.session = self.get_logged_session()
+
+    def get_update_alert_url(self, alert_id):
+        return "{0}/{1}".format(self.ALERT_URL, alert_id)
 
     def get_logged_session(self):
         payload = {
@@ -54,8 +59,17 @@ class TranSappSiteManager:
 
         return self.session.post(self.CREATE_ALERT_URL, data=payload, cookies=res.cookies)
 
+    def update_alert(self, alert_data: dict, alert_id):
+        payload = alert_data
+        update_alert_url = self.get_update_alert_url(alert_id)
+        res = self.session.put(update_alert_url)
+        csrf_token = res.cookies['csrftoken']
+        payload['csrfmiddlewaretoken'] = csrf_token
 
-def create_alert_data(stops: List[str]):
+        return self.session.put(update_alert_url, data=payload, cookies=res.cookies)
+
+
+def create_alert_data(stops: List[str], segment_id: uuid.uuid4):
     alert_data = {}
 
     now = timezone.localtime()
@@ -105,6 +119,7 @@ def create_alerts():
         speed_value = speed.speed
         historic_speed_value = historic_speed.speed
         alert_condition = alert_threshold * speed_value < historic_speed_value
+
         if alert_condition:
             alert_obj_data = {
                 "segment": segment,
@@ -125,5 +140,6 @@ def send_alerts():
     for alert in alerts:
         segment = alert.segment
         stops = segment.get_stops()
-        alert_data = create_alert_data(stops)
+        segment_id = segment.segment_id
+        alert_data = create_alert_data(stops, segment_id)
         site_manager.create_alert(alert_data)
