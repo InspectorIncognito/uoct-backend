@@ -100,12 +100,16 @@ class HistoricSpeedViewSet(viewsets.ModelViewSet, mixins.ListModelMixin):
         queryset = self.queryset
         month = self.request.query_params.get("month")
         day_type = self.request.query_params.get("dayType")
+        temporal_segment = self.request.query_params.get("temporalSegment")
+
         if month is not None:
             month = int(month)
             year = timezone.now().year
             queryset = queryset.filter(timestamp__year=year, timestamp__month=month)
         if day_type is not None:
             queryset = queryset.filter(day_type=day_type)
+        if temporal_segment is not None:
+            queryset = queryset.filter(temporal_segment=temporal_segment)
         queryset = queryset.order_by("segment", "temporal_segment", "temporal_segment")
         return queryset
 
