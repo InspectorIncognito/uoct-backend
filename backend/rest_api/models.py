@@ -61,7 +61,7 @@ class Shape(models.Model):
 
 
 class Segment(models.Model):
-    segment_id = models.UUIDField(primary_key=True, default=uuid.uuid4)
+    segment_id = models.UUIDField(default=uuid.uuid4)
     shape = models.ForeignKey(Shape, on_delete=models.CASCADE)
     sequence = models.IntegerField(blank=False, null=False)
     geometry = ArrayField(ArrayField(models.FloatField()), blank=False, null=False)
