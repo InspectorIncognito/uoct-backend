@@ -1,3 +1,5 @@
+import uuid
+
 from django.contrib.postgres.fields import ArrayField
 from django.db import models
 from shapely.geometry import LineString as shp_LineString
@@ -59,6 +61,7 @@ class Shape(models.Model):
 
 
 class Segment(models.Model):
+    segment_id = models.UUIDField(default=uuid.uuid4)
     shape = models.ForeignKey(Shape, on_delete=models.CASCADE)
     sequence = models.IntegerField(blank=False, null=False)
     geometry = ArrayField(ArrayField(models.FloatField()), blank=False, null=False)
@@ -168,8 +171,6 @@ class HistoricSpeed(models.Model):
     temporal_segment = models.IntegerField(blank=False, null=False, default=0)
     timestamp = models.DateTimeField(default=timezone.localtime)
 
-
-# TODO: Create alert
 
 class SingletonModel(models.Model):
     class Meta:

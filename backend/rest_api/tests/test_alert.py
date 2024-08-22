@@ -20,8 +20,10 @@ class TestAlert(BaseTestCase):
 
     @skip("Skipped")
     def test_send_alert(self):
+        segment = SegmentFactory()
+        speed = SpeedFactory()
         site_manager = TranSappSiteManager()
-        alert_data = create_alert_data(self.stop_codes)
+        alert_data = create_alert_data(self.stop_codes, segment, speed)
         response = site_manager.create_alert(alert_data)
 
     def test_create_alerts(self):

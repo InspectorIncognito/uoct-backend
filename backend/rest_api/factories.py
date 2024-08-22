@@ -1,7 +1,8 @@
 import datetime
+import uuid
 
 import factory
-from rest_api.models import Speed, Shape, Segment, HistoricSpeed, Stop
+from rest_api.models import Speed, Shape, Segment, HistoricSpeed, Stop, Alert
 from random import randint
 import numpy as np
 from django.utils import timezone
@@ -17,6 +18,8 @@ class SegmentFactory(factory.django.DjangoModelFactory):
         model = Segment
 
     shape = factory.SubFactory(ShapeFactory)
+    segment_id = uuid.uuid4()
+    sequence = 0
     geometry = [[0.0, 0.0], [0.0, 0.1], [1.0, 1.0]]
 
 
@@ -27,18 +30,28 @@ class StopFactory(factory.django.DjangoModelFactory):
     segment = factory.SubFactory(SegmentFactory)
     latitude = factory.Faker('latitude')
     longitude = factory.Faker('longitude')
+    stop_id = 'STOP_ID'
+
 
 class SpeedFactory(factory.django.DjangoModelFactory):
     class Meta:
         model = Speed
 
     segment = factory.SubFactory(SegmentFactory)
+    speed = 16.0
     day_type = "L"
 
 
 class HistoricSpeedFactory(SpeedFactory):
     class Meta:
         model = HistoricSpeed
+
+
+class AlertFactory(factory.django.DjangoModelFactory):
+    class Meta:
+        model = Alert
+    segment = factory.SubFactory(SegmentFactory)
+    detected_speed = factory.SubFactory(SpeedFactory)
 
 
 def create_speed_dataset(segment_n: int = 5, speed_n: int = 10):
