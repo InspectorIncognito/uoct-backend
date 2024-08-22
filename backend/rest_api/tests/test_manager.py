@@ -1,29 +1,14 @@
-import json
-
-from rest_api.factories import SegmentFactory, SpeedFactory, HistoricSpeedFactory, StopFactory, AlertFactory
-from rest_api.models import AlertThreshold, Alert
+from rest_api.factories import SegmentFactory, SpeedFactory, StopFactory, AlertFactory
 from rest_api.tests.tests_views_base import BaseTestCase
-from rest_api.util.alert import TranSappSiteManager, create_alert_data
+from rest_api.util.alert import TranSappSiteManager
 from unittest import skip
-from django.utils import timezone
 from rest_api.util.alert import update_alert_from_admin
-from datetime import datetime, timedelta
 
 
 class TestManager(BaseTestCase):
     def setUp(self):
         self.manager = TranSappSiteManager()
         self.segment = SegmentFactory()
-
-    def test_lookup(self):
-        segment_uuid = "82342493-ae05-4ea0-910a-80459ac52447"
-        response = self.manager.alert_lookup(segment_uuid)
-        print(response)
-        return
-        data = response["data"][0]
-        public_id = data["public_id"]
-        print(public_id)
-        return
 
     @skip('Skipping')
     def test_edit(self):
