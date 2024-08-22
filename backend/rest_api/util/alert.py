@@ -102,10 +102,8 @@ def update_alert_from_admin(site_manager: TranSappSiteManager, alert_obj: Alert,
         end=new_end,
         start_day_time=alert_data['start_time_day'],
         end_day_time=new_end_time_day,
-        activated=False
     )
     alert_data.update(new_alert_data)
-    print(alert_data)
 
     site_manager.update_alert(alert_data, alert_public_id)
 

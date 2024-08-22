@@ -172,8 +172,6 @@ class HistoricSpeed(models.Model):
     timestamp = models.DateTimeField(default=timezone.localtime)
 
 
-# TODO: Create alert
-
 class SingletonModel(models.Model):
     class Meta:
         abstract = True
