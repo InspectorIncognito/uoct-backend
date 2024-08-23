@@ -4,7 +4,6 @@ import uuid
 import factory
 from rest_api.models import Speed, Shape, Segment, HistoricSpeed, Stop, Alert
 from random import randint
-import numpy as np
 from django.utils import timezone
 
 
@@ -80,8 +79,8 @@ def create_speed_dataset(segment_n: int = 5, speed_n: int = 10):
                 distances.append(distance)
                 times.append(time_secs)
                 SpeedFactory(distance=distance, time_secs=time_secs, segment=segment, timestamp=speed_timestamp)
-            distances_sum = np.sum(distances)
-            times_sum = np.sum(times)
+            distances_sum = sum(distances)
+            times_sum = sum(times)
             speed_mean = round(3.6 * distances_sum / times_sum, 2)
             data = dataset["segments"].get(segment.pk) or []
             data.append({

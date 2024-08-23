@@ -3,6 +3,7 @@ FROM node:16-alpine3.11 as build-stage
 ARG GIT_PERSONAL_TOKEN
 ARG VUE_APP_BASE_URL
 ARG VITE_MAPBOX_TOKEN
+ARG VITE_FORM_URL
 
 WORKDIR /app
 RUN apk update &&  \
@@ -10,7 +11,7 @@ RUN apk update &&  \
     apk add --no-cache git && \
     git config --global url."https://${GIT_PERSONAL_TOKEN}:@github.com/".insteadOf "https://github.com/"
 # TODO: replace repository url of ui project
-RUN git clone --branch v1.0.0 https://github.com/InspectorIncognito/uoct-frontend.git && \
+RUN git clone --branch v1.0.1 https://github.com/InspectorIncognito/uoct-frontend.git && \
     cp -r uoct-frontend/. . && \
     rm -r uoct-frontend
 RUN npm install
@@ -18,6 +19,7 @@ RUN touch '.env.production' && \
   echo 'NODE_ENV=production' >> '.env.production' && \
   echo "VITE_BASE_URL=${VUE_APP_BASE_URL}" >> '.env.production' && \
   echo "VITE_MAPBOX_TOKEN=${VITE_MAPBOX_TOKEN}" >> '.env.production' && \
+  echo "VITE_FORM_URL"=${VITE_FORM_URL} && \
   echo 'VITE_I18N_LOCALE=es' >> '.env.production' && \
   echo 'VITE_I18N_FALLBACK_LOCALE=en' >> '.env.production' && \
   echo 'VITE_I18N_SUPPORTED_LOCALE=en,es' >> '.env.production'
