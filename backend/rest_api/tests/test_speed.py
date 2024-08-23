@@ -14,19 +14,24 @@ class SpeedTest(BaseTestCase):
 
     def test_get_avg_speed_by_month(self):
         speed_data = {
-            "2024-01": [1.0, 4.0],
-            "2024-02": [1.0, 2.0],
+            "2024-01": [50.0, 4.0],
+            "2024-02": [20.0, 2.0],
         }
         for year_month in speed_data:
-            for speed in speed_data[year_month]:
-                date = datetime.strptime(year_month, "%Y-%m")
-                date = timezone.make_aware(date, timezone.get_current_timezone())
-                SpeedFactory(segment=self.segment, timestamp=date, speed=speed)
+            data = speed_data[year_month]
+            distance = data[0]
+            time_secs = data[1]
+            date = datetime.strptime(year_month, "%Y-%m")
+            date = timezone.make_aware(date, timezone.get_current_timezone())
+            SpeedFactory(segment=self.segment, timestamp=date, distance=distance, time_secs=time_secs)
         january_speed = get_avg_speed_by_month(2024, 1)
         february_speed = get_avg_speed_by_month(2024, 2)
 
-        self.assertEqual(january_speed[0]['avg_speed'], 2.5)
-        self.assertEqual(february_speed[0]['avg_speed'], 1.5)
+        expected_speed_january = 3.6 * 50.0/4.0
+        expected_speed_february = 3.6 * 20.0/2.0
+
+        self.assertEqual(january_speed[0]['avg_speed'], expected_speed_january)
+        self.assertEqual(february_speed[0]['avg_speed'], expected_speed_february)
         self.assertEqual(january_speed[0]['segment'], self.segment.pk)
 
     def test_store_historic_speeds(self):

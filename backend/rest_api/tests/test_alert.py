@@ -27,12 +27,14 @@ class TestAlert(BaseTestCase):
         response = site_manager.create_alert(alert_data)
 
     def test_create_alerts(self):
-        speed_value = 2
-        historic_speed_value = 5
+        # speed < historic / threshold
+        distance = 10
+        time_secs = 1
+        historic_speed_value = 80
         threshold = AlertThreshold.objects.first().threshold
         segment = SegmentFactory(sequence=1)
         stop = StopFactory(segment=segment)
-        speed = SpeedFactory(segment=segment, speed=speed_value, timestamp=self.delta_between,
+        speed = SpeedFactory(segment=segment, distance=distance, time_secs=time_secs, timestamp=self.delta_between,
                              temporal_segment=self.temporal_segment,
                              day_type=self.day_type)
         historic_speed = HistoricSpeedFactory(segment=segment, speed=historic_speed_value, timestamp=self.delta_between,
@@ -42,13 +44,13 @@ class TestAlert(BaseTestCase):
         self.assertEqual(len(alerts), 1)
 
 
-def get_temporal_segment(datetime: datetime):
-    hours_in_minutes = datetime.hour * 60
-    minutes = datetime.minute
+def get_temporal_segment(date: datetime):
+    hours_in_minutes = date.hour * 60
+    minutes = date.minute
     total_minutes = hours_in_minutes + minutes
     return int(total_minutes / 15)
 
 
-def get_day_type(datetime: datetime):
-    weekday = datetime.weekday()
+def get_day_type(date: datetime):
+    weekday = date.weekday()
     return "L" if weekday < 5 else "S" if weekday < 7 else "D"

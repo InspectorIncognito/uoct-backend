@@ -113,7 +113,7 @@ class SegmentCriteria:
 
     def __init__(self, grid_manager: GridManager):
         self.grid_manager = grid_manager
-        self.temporal_segment_duration = 5  # in minutes
+        self.temporal_segment_duration = 15  # in minutes
         self.shape_manager = ShapeManager()
 
     def get_spatial_segment(self, *args, **kwargs):

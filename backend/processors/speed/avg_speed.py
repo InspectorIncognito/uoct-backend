@@ -1,6 +1,6 @@
 from rest_api.models import Speed, HistoricSpeed, Segment
 from datetime import datetime, timedelta
-from django.db.models import Avg
+from django.db.models import Avg, Sum
 from django.utils import timezone
 from django.db.models import Func
 
@@ -50,11 +50,14 @@ def get_avg_speed_by_month(year, month):
         timestamp__lt=end_date,
     )
 
-    avg_speeds = (speeds_in_month.
-                  values("segment", "day_type")
-                  .annotate(avg_speed=Avg("speed"))
-                  .order_by("segment", "day_type")
-                  )
+    avg_speeds = speeds_in_month.values('segment', 'temporal_segment', 'day_type').annotate(
+        avg_speed=Round2(Sum('distance')/Sum('time_secs') * 3.6)
+    ).order_by('segment', 'temporal_segment', 'day_type')
+    #avg_speeds = (speeds_in_month.
+    #              values("segment", "day_type")
+    #              .annotate(avg_speed=Avg("speed"))
+    #              .order_by("segment", "day_type")
+    #              )
     return avg_speeds
 
 

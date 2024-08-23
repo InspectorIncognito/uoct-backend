@@ -66,35 +66,13 @@ class ServicesViewSet(viewsets.ModelViewSet):
     queryset = Services.objects.all()
 
 
-class SpeedViewSet(viewsets.ModelViewSet):
+class GenericSpeedViewSet(viewsets.ModelViewSet, mixins.ListModelMixin):
+    class Meta:
+        abstract = True
+
     permission_classes = [AllowAny]
-    serializer_class = SpeedSerializer
-    queryset = Speed.objects.all().order_by('-timestamp')
-
-    def to_csv(self, request, *args, **kwargs):
-        queryset = self.get_queryset()
-        start_date = request.query_params.get('start_date', None)
-        if start_date is not None:
-            start_date = datetime.strptime(start_date, '%Y-%d-%mT%H:%M:%S')
-            start_date = timezone.make_aware(start_date, timezone.get_current_timezone())
-            queryset = queryset.filter(timestamp__gte=start_date)
-
-        response = HttpResponse(content_type='text/csv')
-        response['Content-Disposition'] = 'attachment; filename="segment_speeds.csv"'
-        serializer = self.get_serializer(queryset, many=True)
-        fieldnames = ['shape', 'sequence', 'speed', 'timestamp', 'day_type']
-        writer = csv.DictWriter(response, fieldnames=fieldnames)
-        writer.writeheader()
-        for obj in serializer.data:
-            writer.writerow(obj)
-
-        return response
-
-
-class HistoricSpeedViewSet(viewsets.ModelViewSet, mixins.ListModelMixin):
-    permission_classes = [AllowAny]
-    serializer_class = HistoricSpeedSerializer
-    queryset = HistoricSpeed.objects.all().order_by("segment")
+    serializer_class = None
+    queryset = None
 
     def get_queryset(self):
         queryset = self.queryset
@@ -110,8 +88,37 @@ class HistoricSpeedViewSet(viewsets.ModelViewSet, mixins.ListModelMixin):
             queryset = queryset.filter(day_type=day_type)
         if temporal_segment is not None:
             queryset = queryset.filter(temporal_segment=temporal_segment)
-        queryset = queryset.order_by("segment", "temporal_segment", "temporal_segment")
+        queryset = queryset.order_by("segment", "temporal_segment")
         return queryset
+
+
+class SpeedViewSet(GenericSpeedViewSet):
+    serializer_class = SpeedSerializer
+    queryset = Speed.objects.all().order_by('-temporal_segment')
+
+    def to_csv(self, request, *args, **kwargs):
+        queryset = self.get_queryset()
+        start_date = request.query_params.get('start_date', None)
+        if start_date is not None:
+            start_date = datetime.strptime(start_date, '%Y-%d-%mT%H:%M:%S')
+            start_date = timezone.make_aware(start_date, timezone.get_current_timezone())
+            queryset = queryset.filter(timestamp__gte=start_date)
+
+        response = HttpResponse(content_type='text/csv')
+        response['Content-Disposition'] = 'attachment; filename="segment_speeds.csv"'
+        serializer = self.get_serializer(queryset, many=True)
+        fieldnames = ['shape', 'sequence', 'temporal_segment', 'day_type', 'distance', 'time_secs']
+        writer = csv.DictWriter(response, fieldnames=fieldnames)
+        writer.writeheader()
+        for obj in serializer.data:
+            writer.writerow(obj)
+
+        return response
+
+
+class HistoricSpeedViewSet(GenericSpeedViewSet):
+    serializer_class = HistoricSpeedSerializer
+    queryset = HistoricSpeed.objects.all().order_by("segment")
 
     def to_csv(self, request, *args, **kwargs):
         queryset = self.get_queryset()
