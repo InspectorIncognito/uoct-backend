@@ -136,20 +136,29 @@ class Stop(models.Model):
 
 class Speed(models.Model):
     segment = models.ForeignKey(Segment, on_delete=models.CASCADE)
-    speed = models.FloatField(blank=False, null=False)
-    timestamp = models.DateTimeField(default=timezone.localtime)
-    day_type = models.CharField(max_length=1, blank=False, null=False, default="L")
     temporal_segment = models.IntegerField(blank=False, null=False, default=0)
+    day_type = models.CharField(max_length=1, blank=False, null=False, default="L")
+    distance = models.FloatField(default=0)
+    time_secs = models.FloatField(default=0)
+    timestamp = models.DateTimeField(default=timezone.localtime)
+
+    # speed = models.FloatField(blank=False, null=False)
+
+    def get_speed(self):
+        try:
+            return round(self.distance / self.time_secs * 3.6, 2)
+        except ZeroDivisionError:
+            return 0.0
 
     def assign_color(self):
         for min_speed, max_speed, color in SPEED_COLOR_RANGES:
-            if min_speed <= self.speed <= max_speed:
+            if min_speed <= self.get_speed() <= max_speed:
                 return color
         return "#000000"
 
     def check_value(self):
         geojson_data = dict()
-        geojson_data["speed"] = self.speed
+        geojson_data["speed"] = self.get_speed()
         geojson_data["color"] = self.assign_color()
         geojson_data["temporal_segment"] = self.temporal_segment
         historic_speed: HistoricSpeed = HistoricSpeed.objects.filter(

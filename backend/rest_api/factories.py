@@ -38,18 +38,24 @@ class SpeedFactory(factory.django.DjangoModelFactory):
         model = Speed
 
     segment = factory.SubFactory(SegmentFactory)
-    speed = 16.0
+    distance = 100
+    time_secs = 5
     day_type = "L"
 
 
-class HistoricSpeedFactory(SpeedFactory):
+class HistoricSpeedFactory(factory.django.DjangoModelFactory):
     class Meta:
         model = HistoricSpeed
+
+    segment = factory.SubFactory(SegmentFactory)
+    speed = 16.0
+    day_type = "L"
 
 
 class AlertFactory(factory.django.DjangoModelFactory):
     class Meta:
         model = Alert
+
     segment = factory.SubFactory(SegmentFactory)
     detected_speed = factory.SubFactory(SpeedFactory)
 
@@ -66,12 +72,17 @@ def create_speed_dataset(segment_n: int = 5, speed_n: int = 10):
         for month in range(1, 13):
             speed_timestamp = datetime.datetime(this_year, month, 1)
             speed_timestamp = timezone.make_aware(speed_timestamp, timezone.get_current_timezone())
-            speeds = []
+            distances = []
+            times = []
             for _ in range(speed_n):
-                speed = randint(10, 30)
-                SpeedFactory(speed=speed, segment=segment, timestamp=speed_timestamp)
-                speeds.append(speed)
-            speed_mean = np.mean(speeds)
+                distance = randint(100, 1000)
+                time_secs = randint(10, 50)
+                distances.append(distance)
+                times.append(time_secs)
+                SpeedFactory(distance=distance, time_secs=time_secs, segment=segment, timestamp=speed_timestamp)
+            distances_sum = np.sum(distances)
+            times_sum = np.sum(times)
+            speed_mean = round(3.6 * distances_sum / times_sum, 2)
             data = dataset["segments"].get(segment.pk) or []
             data.append({
                 "date": month,

@@ -130,7 +130,7 @@ def create_alert_data(segment: Segment, speed: Speed):
     shape_id = str(segment.shape.pk)
     temporal_segment = str(speed.temporal_segment)
     day_type = str(speed.day_type)
-    detected_speed = str(speed.speed)
+    detected_speed = str(speed.get_speed())
 
     alert_data['name'] = "Speed Anomaly {}".format(segment_uuid)
 
@@ -173,7 +173,7 @@ def create_alerts():
                                                       temporal_segment=temporal_segment).order_by("-timestamp").first()
         if historic_speed is None:
             continue
-        speed_value = speed.speed
+        speed_value = speed.get_speed()
         historic_speed_value = historic_speed.speed
         alert_condition = speed_value < historic_speed_value / alert_threshold
 
