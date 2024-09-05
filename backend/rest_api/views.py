@@ -82,7 +82,7 @@ class GenericSpeedViewSet(viewsets.ModelViewSet, mixins.ListModelMixin):
 
         if month is not None:
             month = int(month)
-            year = timezone.now().year
+            year = timezone.localtime().year
             queryset = queryset.filter(timestamp__year=year, timestamp__month=month)
         if day_type is not None:
             queryset = queryset.filter(day_type=day_type)

@@ -4,5 +4,5 @@ from processors.speed.avg_speed import get_last_month_avg_speed
 
 class Command(BaseCommand):
     def handle(self, *args, **options):
-        print("Calling get_last_month_avg_speed...")
+        print("Calling get_last_month_avg_speed command...")
         get_last_month_avg_speed()

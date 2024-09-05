@@ -10,7 +10,7 @@ from gtfs_rt.utils import get_temporal_segment
 
 
 def calculate_speed(start_date: datetime.datetime = None, end_date: datetime.datetime = None):
-    print("Calling calculate_speed...")
+    print("Calling calculate_speed command...")
     if start_date is None or end_date is None:
         delta = datetime.timedelta(minutes=15)
         end_date = timezone.localtime().replace(second=0, microsecond=0)
@@ -63,12 +63,13 @@ def calculate_speed(start_date: datetime.datetime = None, end_date: datetime.dat
             print(f"Segment {sequence} from shape {shape_id} does not exists")
             continue
         else:
-            speed_data = {
-                "segment": segment,
-                "distance": distance,
-                "time_secs": time_secs,
-                "day_type": today_weekday,
-                "temporal_segment": temporal_segment,
-            }
+            speed_data = dict(
+                segment=segment,
+                temporal_segment=temporal_segment,
+                day_type=today_weekday,
+                distance=distance,
+                time_secs=time_secs,
+                timestamp=timezone.localtime()
+            )
             Speed.objects.create(**speed_data)
     print("Speed records up to date.")

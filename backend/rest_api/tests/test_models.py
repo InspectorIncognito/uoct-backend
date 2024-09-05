@@ -152,7 +152,8 @@ class SegmentTest(GeometryTestCase):
 class GeoJSONTest(GeometryTestCase):
     def test_shapes_to_geojson(self):
         _, _ = self.create_segments()
-        actual = shapes_to_geojson()
+        map_data = shapes_to_geojson()
+        actual = map_data['geojson']
         features = []
         shapes = Shape.objects.all()
         for shape in shapes:
@@ -165,6 +166,7 @@ class GeoJSONTest(GeometryTestCase):
 
     def test_shapes_to_geojson_without_shapes(self):
         expected = FeatureCollection(features=[])
-        actual = shapes_to_geojson()
+        map_data = shapes_to_geojson()
+        actual = map_data['geojson']
 
         self.assertDictEqual(actual, expected)

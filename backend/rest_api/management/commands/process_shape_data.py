@@ -13,7 +13,7 @@ class Command(BaseCommand):
         )
 
     def handle(self, *args, **options):
-        print("Calling process_shape_data...")
+        print("Calling process_shape_data command...")
         if options["distance"]:
             if options["distance"] <= 0.0:
                 raise CommandError("Distance must be greater than 0")

@@ -15,8 +15,8 @@ def flush_historic_speeds():
 
 
 def get_last_month_avg_speed():
-    print("Calling get_last_month_avg_speed...")
-    now = timezone.now()
+    print("Calling get_last_month_avg_speed command...")
+    now = timezone.localtime()
     yesterday = now - timedelta(days=1)
     last_month = yesterday.month
     last_year = yesterday.year

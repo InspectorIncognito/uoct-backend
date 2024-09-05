@@ -35,7 +35,7 @@ class SpeedTest(BaseTestCase):
         self.assertEqual(january_speed[0]['segment'], self.segment.pk)
 
     def test_store_historic_speeds(self):
-        this_year = timezone.now().year
+        this_year = timezone.localtime().year
         dataset = create_speed_dataset()
         for month in range(1, 13):
             creation_datetime = datetime(this_year, month, 1)

@@ -61,13 +61,17 @@ class Shape(models.Model):
 
 
 class Segment(models.Model):
-    segment_id = models.UUIDField(default=uuid.uuid4)
+    segment_id = models.UUIDField(unique=True, default=uuid.uuid4)
     shape = models.ForeignKey(Shape, on_delete=models.CASCADE)
     sequence = models.IntegerField(blank=False, null=False)
     geometry = ArrayField(ArrayField(models.FloatField()), blank=False, null=False)
 
     def __str__(self):
         return f"Segment {self.sequence} of Shape {self.shape}"
+
+    def get_middle_point(self):
+        geometry_len = len(self.geometry)
+        return self.geometry[int(geometry_len / 2)]
 
     def get_distance(self):
         accum_distance = 0
@@ -216,9 +220,18 @@ class Alert(models.Model):
     segment = models.ForeignKey(Segment, on_delete=models.CASCADE)
     detected_speed = models.ForeignKey(Speed, on_delete=models.CASCADE)
     temporal_segment = models.IntegerField(default=0)
-    voted_positive = models.IntegerField(default=0)
-    voted_negative = models.IntegerField(default=0)
+    useful = models.IntegerField(default=0)
+    useless = models.IntegerField(default=0)
     timestamp = models.DateTimeField(default=timezone.localtime)
+
+    def get_key_value(self):
+        shape = str(self.segment.shape.pk)
+        sequence = str(self.segment.sequence)
+        day_type = str(self.detected_speed.day_type)
+        temporal_segment = str(self.temporal_segment)
+        speed = str(self.detected_speed.get_speed())
+        key_values = [shape, sequence, day_type, temporal_segment, speed]
+        return '|'.join(key_values)
 
 
 class Services(models.Model):

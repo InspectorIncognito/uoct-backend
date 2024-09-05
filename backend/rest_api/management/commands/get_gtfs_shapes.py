@@ -11,7 +11,7 @@ class Command(BaseCommand):
     help = 'Read the GTFS file to get all the shapes and their direction'
 
     def handle(self, *args, **options):
-        print("Calling get_gtfs_shapes...")
+        print("Calling get_gtfs_shapes command...")
         gtfs_manager = GTFSManager()
         print("GTFS LOADED")
         processed_shapes = gtfs_manager.get_processed_df()
