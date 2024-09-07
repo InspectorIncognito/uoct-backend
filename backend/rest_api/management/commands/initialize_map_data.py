@@ -18,8 +18,10 @@ class Command(BaseCommand):
             call_command('process_fixture_data')
         # Create GTFSShapes
         call_command('get_gtfs_shapes')
-        # Assign services to segments
+        # Assign services to all segments
         call_command('assign_routes_to_segments')
+        # Assign stops to all segments
+        call_command('assign_stops_to_segments')
         # Set alert threshold value
         call_command('set_alert_threshold')
 

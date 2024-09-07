@@ -13,6 +13,7 @@ class Command(BaseCommand):
     help = 'Debug command'
 
     def handle(self, *args, **options):
+        print("Calling create_alerts command...")
         distance_threshold = 500.0
         query_data = gpd.GeoDataFrame.from_features(overpass_query(ALAMEDA_QUERY))
         features = []

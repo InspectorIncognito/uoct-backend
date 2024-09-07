@@ -17,7 +17,7 @@ class SegmentFactory(factory.django.DjangoModelFactory):
         model = Segment
 
     shape = factory.SubFactory(ShapeFactory)
-    segment_id = uuid.uuid4()
+    segment_id = factory.Faker('uuid4')
     sequence = 0
     geometry = [[0.0, 0.0], [0.0, 0.1], [1.0, 1.0]]
 

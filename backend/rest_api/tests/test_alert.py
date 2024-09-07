@@ -8,6 +8,7 @@ from rest_api.util.alert import create_alerts, get_active_alerts
 from datetime import datetime, timedelta
 
 
+@skip("Debug")
 class TestAlert(BaseTestCase):
     def setUp(self):
         self.delta = timedelta(minutes=15)

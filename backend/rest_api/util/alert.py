@@ -29,7 +29,7 @@ class TranSappSiteManager:
         self.session = self.get_logged_session()
 
     def get_update_alert_url(self, alert_id):
-        return "{0}/{1}".format(self.ALERT_URL, alert_id)
+        return f"{self.ALERT_URL}/{alert_id}"
 
     def get_delete_alert_url(self, alert_public_id):
         return f"{self.ALERT_URL}/{alert_public_id}/delete"
@@ -102,18 +102,14 @@ class TranSappSiteManager:
                 print("Passed alert", name)
                 continue
             alert_public_id = site_data['public_id']
-            print(f"Deleting {name}")
             delete_response = self.alert_delete(alert_public_id)
-            print(delete_response)
-            print('deleted', alert_public_id)
-            exit()
 
 
 def create_alert_to_admin(site_manager: TranSappSiteManager, alert_obj: Alert):
     segment = alert_obj.segment
     speed = alert_obj.detected_speed
     alert_data = create_alert_data(segment, speed)
-    site_manager.create_alert(alert_data)
+    return site_manager.create_alert(alert_data)
 
 
 def update_alert_from_admin(site_manager: TranSappSiteManager, alert_obj: Alert, alert_data: dict, activated=True):
@@ -136,7 +132,7 @@ def update_alert_from_admin(site_manager: TranSappSiteManager, alert_obj: Alert,
     )
     alert_data.update(new_alert_data)
 
-    site_manager.update_alert(alert_data, alert_public_id)
+    return site_manager.update_alert(alert_data, alert_public_id)
 
 
 def create_alert_data(segment: Segment, speed: Speed):
@@ -184,7 +180,6 @@ def create_alert_data(segment: Segment, speed: Speed):
 
 
 def create_alerts():
-    print("Calling create_alerts command...")
     now = timezone.localtime()
     end_time = now.replace(second=0, microsecond=0)
     delta = timedelta(minutes=15)
