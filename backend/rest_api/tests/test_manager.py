@@ -5,7 +5,7 @@ from unittest import skip
 from rest_api.util.alert import update_alert_from_admin
 
 
-# @skip("This class is for debugging purposes")
+@skip("This class is for debugging purposes")
 class TestManager(BaseTestCase):
     def setUp(self):
         self.site_manager = TranSappSiteManager()
@@ -62,3 +62,8 @@ class TestManager(BaseTestCase):
         lookup_response = self.site_manager.get_all_alerts()
         alerts = lookup_response["data"]
         print(lookup_response)
+
+    def test_get_all_alerts(self):
+        all_site_alerts = self.site_manager.get_all_alerts()
+        print(all_site_alerts)
+        print(len(all_site_alerts))

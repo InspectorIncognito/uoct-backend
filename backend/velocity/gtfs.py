@@ -429,7 +429,6 @@ class GTFSManager_OLD:
 
     def save_gtfs_shapes_to_db(self, processed_df: pd.DataFrame):
         flush_gtfs_shape_objects()
-        print("processed df shape:", processed_df.shape)
         for _, row in processed_df.iterrows():
             shape_id = row['shape_id']
             geometry = row['coordinates']
@@ -564,7 +563,6 @@ class GTFSManager:
 
     def save_gtfs_shapes_to_db(self, processed_df: pd.DataFrame):
         flush_gtfs_shape_objects()
-        print("processed df shape:", processed_df.shape)
         for _, row in processed_df.iterrows():
             shape_id = row['shape_id']
             geometry = row['coordinates']

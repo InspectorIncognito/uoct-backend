@@ -20,12 +20,12 @@ class TranSappSiteManager:
     def __init__(self):
         self.server_name = 'https://{0}'.format(config('TRANSAPP_HOST'))
         self.server_username = config('TRANSAPP_SITE_USERNAME')
-        # urls
+
         self.LOGIN_URL = '{0}/login/?next=/'.format(self.server_name)
         self.ALERT_URL = '{0}/adminapp/alert'.format(self.server_name)
         self.LOOKUP_URL = '{0}/adminapp/alert/data'.format(self.server_name)
         self.CREATE_ALERT_URL = "{0}/add".format(self.ALERT_URL)
-        self.DRAWTABLE = "draw=1&columns[0][data]=activated&columns[0][name]=&columns[0][searchable]=true&columns[0][orderable]=true&columns[0][search][value]=&columns[0][search][regex]=false&columns[1][data]=name&columns[1][name]=&columns[1][searchable]=true&columns[1][orderable]=true&columns[1][search][value]=&columns[1][search][regex]=false&columns[2][data]=start&columns[2][name]=&columns[2][searchable]=true&columns[2][orderable]=true&columns[2][search][value]=&columns[2][search][regex]=false&columns[3][data]=end&columns[3][name]=&columns[3][searchable]=true&columns[3][orderable]=true&columns[3][search][value]=&columns[3][search][regex]=false&columns[4][data]=start_time_day&columns[4][name]=&columns[4][searchable]=true&columns[4][orderable]=true&columns[4][search][value]=&columns[4][search][regex]=false&columns[5][data]=end_time_day&columns[5][name]=&columns[5][searchable]=true&columns[5][orderable]=true&columns[5][search][value]=&columns[5][search][regex]=false&columns[6][data]=week_days&columns[6][name]=&columns[6][searchable]=true&columns[6][orderable]=true&columns[6][search][value]=&columns[6][search][regex]=false&columns[7][data]=stop_number&columns[7][name]=&columns[7][searchable]=true&columns[7][orderable]=true&columns[7][search][value]=&columns[7][search][regex]=false&columns[8][data]=useful&columns[8][name]=&columns[8][searchable]=true&columns[8][orderable]=false&columns[8][search][value]=&columns[8][search][regex]=false&columns[9][data]=useless&columns[9][name]=&columns[9][searchable]=true&columns[9][orderable]=false&columns[9][search][value]=&columns[9][search][regex]=false&columns[10][data]=&columns[10][name]=&columns[10][searchable]=true&columns[10][orderable]=false&columns[10][search][value]=&columns[10][search][regex]=false&order[0][column]=0&order[0][dir]=asc&start=0&length=10&search[regex]=false&_=1564452662157"
+
         self.session = self.get_logged_session()
 
     def get_update_alert_url(self, alert_id):
@@ -33,6 +33,10 @@ class TranSappSiteManager:
 
     def get_delete_alert_url(self, alert_public_id):
         return f"{self.ALERT_URL}/{alert_public_id}/delete"
+
+    @staticmethod
+    def get_drawtable(start: int = 0, length: int = 10):
+        return f"draw=1&columns[0][data]=activated&columns[0][name]=&columns[0][searchable]=true&columns[0][orderable]=true&columns[0][search][value]=&columns[0][search][regex]=false&columns[1][data]=name&columns[1][name]=&columns[1][searchable]=true&columns[1][orderable]=true&columns[1][search][value]=&columns[1][search][regex]=false&columns[2][data]=start&columns[2][name]=&columns[2][searchable]=true&columns[2][orderable]=true&columns[2][search][value]=&columns[2][search][regex]=false&columns[3][data]=end&columns[3][name]=&columns[3][searchable]=true&columns[3][orderable]=true&columns[3][search][value]=&columns[3][search][regex]=false&columns[4][data]=start_time_day&columns[4][name]=&columns[4][searchable]=true&columns[4][orderable]=true&columns[4][search][value]=&columns[4][search][regex]=false&columns[5][data]=end_time_day&columns[5][name]=&columns[5][searchable]=true&columns[5][orderable]=true&columns[5][search][value]=&columns[5][search][regex]=false&columns[6][data]=week_days&columns[6][name]=&columns[6][searchable]=true&columns[6][orderable]=true&columns[6][search][value]=&columns[6][search][regex]=false&columns[7][data]=stop_number&columns[7][name]=&columns[7][searchable]=true&columns[7][orderable]=true&columns[7][search][value]=&columns[7][search][regex]=false&columns[8][data]=useful&columns[8][name]=&columns[8][searchable]=true&columns[8][orderable]=false&columns[8][search][value]=&columns[8][search][regex]=false&columns[9][data]=useless&columns[9][name]=&columns[9][searchable]=true&columns[9][orderable]=false&columns[9][search][value]=&columns[9][search][regex]=false&columns[10][data]=&columns[10][name]=&columns[10][searchable]=true&columns[10][orderable]=false&columns[10][search][value]=&columns[10][search][regex]=false&order[0][column]=0&order[0][dir]=asc&start={start}&length={length}&search[regex]=false&_=1564452662157"
 
     def get_logged_session(self):
         payload = {
@@ -74,16 +78,27 @@ class TranSappSiteManager:
         return self.session.post(update_alert_url, data=payload, cookies=res.cookies)
 
     def alert_lookup(self, alert_name: str):
-        url = f'{self.LOOKUP_URL}?{self.DRAWTABLE}&search[value]={alert_name}'
+        url = f'{self.LOOKUP_URL}?{self.get_drawtable()}&search[value]={alert_name}'
         response_raw = self.session.get(url)
         response_json = json.loads(response_raw.content.decode())
         return response_json
 
-    def get_all_alerts(self):
-        url = f'{self.LOOKUP_URL}?{self.DRAWTABLE}&search[value]=Speed Anomaly'
+    def get_all_alerts(self) -> list:
+        query = 'search[value]=Speed Anomaly'
+        url = f'{self.LOOKUP_URL}?{self.get_drawtable()}&{query}'
         response_raw = self.session.get(url)
         response_json = json.loads(response_raw.content.decode())
-        return response_json
+        records_total = response_json['recordsTotal']
+        all_site_alerts = response_json['data']
+        if records_total > len(all_site_alerts):
+            start = len(all_site_alerts)
+            length = records_total - start
+            url = f'{self.LOOKUP_URL}?{self.get_drawtable(start=start, length=length)}&{query}'
+            response_rest_site_alerts_raw = self.session.get(url)
+            rest_site_alerts_json = json.loads(response_rest_site_alerts_raw.content.decode())
+            rest_site_alerts = rest_site_alerts_json['data']
+            all_site_alerts = all_site_alerts + rest_site_alerts
+        return all_site_alerts
 
     def alert_delete(self, alert_public_id):
         alert_delete_url = self.get_delete_alert_url(alert_public_id)
@@ -96,7 +111,7 @@ class TranSappSiteManager:
 
     def delete_all_alerts(self):
         site_alerts = self.get_all_alerts()
-        for site_data in site_alerts['data']:
+        for site_data in site_alerts:
             name = site_data['name']
             if "Speed Anomaly" not in name:
                 print("Passed alert", name)
@@ -118,7 +133,7 @@ def update_alert_from_admin(site_manager: TranSappSiteManager, alert_obj: Alert,
     alert_public_id = alert_data['public_id']
 
     new_end = timezone.localtime().strftime('%Y-%m-%d')
-    delta = timedelta(minutes=15)
+    delta = timedelta(minutes=20)
     new_end_time_day = str((datetime.datetime.strptime(alert_data['end_time_day'], '%H:%M:%S') + delta).time())[:-3]
 
     alert_data = create_alert_data(segment, speed)
@@ -233,8 +248,7 @@ def update_alerts(site_manager: TranSappSiteManager):
     temporal_segment = get_temporal_segment(start_time)
 
     alerts = Alert.objects.filter(timestamp__date=start_time.date(), temporal_segment=temporal_segment)
-    alert_response = site_manager.get_all_alerts()
-    alert_data = alert_response['data']
+    alert_data = site_manager.get_all_alerts()
     for alert in alerts:
         segment_uuid = alert.segment.segment_id
         site_alert = search_alert_by_uuid(alert_data, segment_uuid)

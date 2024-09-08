@@ -25,4 +25,4 @@ class Command(BaseCommand):
         # Set alert threshold value
         call_command('set_alert_threshold')
 
-        print("initialize_map_data finished.")
+        print("initialize_map_data command finished.")
