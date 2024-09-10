@@ -6,9 +6,9 @@ from django.http import JsonResponse, HttpResponse
 from rest_framework import generics
 from rest_framework.permissions import AllowAny
 from processors.models.shapes import shapes_to_geojson
-from rest_api.models import Shape, Segment, GTFSShape, Services, Speed, HistoricSpeed, Stop, AlertThreshold
+from rest_api.models import Shape, Segment, GTFSShape, Services, Speed, HistoricSpeed, Stop, AlertThreshold, Alert
 from rest_api.serializers import ShapeSerializer, SegmentSerializer, GTFSShapeSerializer, ServicesSerializer, \
-    SpeedSerializer, HistoricSpeedSerializer, StopSerializer, AlertThresholdSerializer
+    SpeedSerializer, HistoricSpeedSerializer, StopSerializer, AlertThresholdSerializer, AlertSerializer
 from gtfs_rt.processors.speed import calculate_speed
 import csv
 from geojson import FeatureCollection, Feature, Point
@@ -132,6 +132,12 @@ class HistoricSpeedViewSet(GenericSpeedViewSet):
             writer.writerow(obj)
 
         return response
+
+
+class AlertViewSet(viewsets.ModelViewSet):
+    permission_classes = [AllowAny]
+    serializer_class = AlertSerializer
+    queryset = Alert.objects.all()
 
 
 class StopViewSet(viewsets.ModelViewSet):

@@ -57,6 +57,7 @@ class AlertFactory(factory.django.DjangoModelFactory):
 
     segment = factory.SubFactory(SegmentFactory)
     detected_speed = factory.SubFactory(SpeedFactory)
+    #timestamp = timezone.localtime()
 
 
 def create_speed_dataset(segment_n: int = 5, speed_n: int = 10):

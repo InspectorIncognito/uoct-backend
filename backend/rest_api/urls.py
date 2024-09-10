@@ -1,6 +1,6 @@
 from django.urls import include, path
 from rest_api.views import GeoJSONViewSet, ShapeViewSet, SegmentViewSet, GridViewSet, GTFSShapeViewSet, ServicesViewSet, \
-    SpeedViewSet, HistoricSpeedViewSet, GTFSStopsViewSet, StopViewSet
+    SpeedViewSet, HistoricSpeedViewSet, GTFSStopsViewSet, StopViewSet, AlertViewSet
 
 # Wire up our API using automatic URL routing.
 # Additionally, we include login URLs for the browsable API.
@@ -10,6 +10,7 @@ urlpatterns = [
     path('services/', ServicesViewSet.as_view({"get": 'list'}), name="services"),
     path('speeds/', SpeedViewSet.as_view({"get": 'list'}), name="speeds"),
     path('speeds/to_csv/', SpeedViewSet.as_view({"get": "to_csv"}), name="shape-to_csv"),
+    path('alerts/', AlertViewSet.as_view({"get": 'list'}), name="alerts"),
     path('historicSpeeds/', HistoricSpeedViewSet.as_view({"get": "list"}), name="historicSpeeds"),
     path('historicSpeeds/to_csv/', HistoricSpeedViewSet.as_view({"get": "to_csv"}), name="historicSpeeds-to_csv"),
     path('stops/', StopViewSet.as_view({"get": "list"}), name="stops"),

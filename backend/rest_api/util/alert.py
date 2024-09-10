@@ -1,5 +1,6 @@
 import datetime
 import json
+import uuid
 
 import requests
 import logging
@@ -89,16 +90,16 @@ class TranSappSiteManager:
         response_raw = self.session.get(url)
         response_json = json.loads(response_raw.content.decode())
         records_total = response_json['recordsTotal']
-        all_site_alerts = response_json['data']
-        if records_total > len(all_site_alerts):
-            start = len(all_site_alerts)
+        site_alerts = response_json['data']
+        if records_total > len(site_alerts):
+            start = len(site_alerts)
             length = records_total - start
             url = f'{self.LOOKUP_URL}?{self.get_drawtable(start=start, length=length)}&{query}'
             response_rest_site_alerts_raw = self.session.get(url)
             rest_site_alerts_json = json.loads(response_rest_site_alerts_raw.content.decode())
             rest_site_alerts = rest_site_alerts_json['data']
-            all_site_alerts = all_site_alerts + rest_site_alerts
-        return all_site_alerts
+            site_alerts = site_alerts + rest_site_alerts
+        return site_alerts
 
     def alert_delete(self, alert_public_id):
         alert_delete_url = self.get_delete_alert_url(alert_public_id)
@@ -147,7 +148,7 @@ def update_alert_from_admin(site_manager: TranSappSiteManager, alert_obj: Alert,
     )
     alert_data.update(new_alert_data)
 
-    return site_manager.update_alert(alert_data, alert_public_id)
+    return site_manager.update_alert(alert_data, alert_id=alert_public_id)
 
 
 def create_alert_data(segment: Segment, speed: Speed):
@@ -163,7 +164,7 @@ def create_alert_data(segment: Segment, speed: Speed):
     alert_data['end'] = str(now.date())
 
     start_time_day = now.time()
-    end_time_day = (now + timedelta(minutes=30)).time()
+    end_time_day = (now + timedelta(minutes=20)).time()
     alert_data['start_time_day'] = f"{start_time_day.hour:02}:{start_time_day.minute:02}"
     alert_data['end_time_day'] = f"{end_time_day.hour:02}:{end_time_day.minute:02}"
 
@@ -228,11 +229,11 @@ def create_alerts():
             Alert.objects.create(**alert_obj_data)
 
 
-def search_alert_by_uuid(alert_data, segment_uuid):
+def search_alert_by_uuid(alert_data: dict, segment_uuid: uuid.UUID) -> dict or None:
     for alert in alert_data:
         alert_name = alert['name']
-        alert_uuid = alert_name.split(' ')[-1]
-        if alert_uuid == segment_uuid:
+        segment_id = uuid.UUID(alert_name.split(' ')[-1])
+        if segment_id == segment_uuid:
             return alert
     return None
 
@@ -267,7 +268,7 @@ def update_alerts(site_manager: TranSappSiteManager):
         if alert_obj is None:
             continue
         if is_checked:
-            update_alert_from_admin(site_manager, alert_obj, site_alert)
+            update_alert_from_admin(site_manager, alert_obj=alert_obj, alert_data=site_alert)
         else:
             if site_alert.get('activated', False):
                 update_alert_from_admin(site_manager, alert_obj, site_alert, activated=False)

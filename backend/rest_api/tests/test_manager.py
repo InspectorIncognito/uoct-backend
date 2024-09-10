@@ -1,8 +1,12 @@
+import datetime
+
 from rest_api.factories import SegmentFactory, SpeedFactory, StopFactory, AlertFactory
 from rest_api.tests.tests_views_base import BaseTestCase
 from rest_api.util.alert import TranSappSiteManager, create_alert_to_admin
-from unittest import skip
-from rest_api.util.alert import update_alert_from_admin
+from unittest import skip, mock
+from rest_api.util.alert import update_alert_from_admin, update_alerts
+from django.utils import timezone
+from gtfs_rt.utils import get_temporal_segment
 
 
 @skip("This class is for debugging purposes")
@@ -67,3 +71,33 @@ class TestManager(BaseTestCase):
         all_site_alerts = self.site_manager.get_all_alerts()
         print(all_site_alerts)
         print(len(all_site_alerts))
+
+    @mock.patch('rest_api.util.alert.timezone')
+    def test_duplicate_alert_bug(self, mock_timezone):
+        dt = datetime.timedelta(minutes=15)
+        timestamp_reference = timezone.localtime()
+        alert_t1 = timestamp_reference - 2 * dt
+        alert_t2 = timestamp_reference - dt
+        alert_1_ts = get_temporal_segment(alert_t1)
+        alert_2_ts = get_temporal_segment(alert_t2)
+
+        update_alert_t1 = timestamp_reference - dt
+        update_alert_t2 = timestamp_reference
+        #update_alert_t3 = timestamp_reference + dt
+
+        segment = SegmentFactory()
+        speed1 = SpeedFactory(distance=500, time_secs=1)
+        speed2 = SpeedFactory(distance=500, time_secs=5)
+
+        alert1 = AlertFactory(segment=segment, detected_speed=speed1, timestamp=alert_t1, temporal_segment=alert_1_ts)
+        alert2 = AlertFactory(segment=segment, detected_speed=speed2, timestamp=alert_t2, temporal_segment=alert_2_ts)
+
+        mock_timezone.localtime.return_value = update_alert_t1
+        update_alerts(self.site_manager)
+
+        mock_timezone.localtime.return_value = update_alert_t2
+        update_alerts(self.site_manager)
+
+        #mock_timezone.localtime.return_value = update_alert_t3
+        #update_alerts(self.site_manager)
+
