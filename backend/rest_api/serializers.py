@@ -20,7 +20,7 @@ class SpeedSerializer(serializers.ModelSerializer):
 
     class Meta:
         model = Speed
-        fields = ['shape', 'sequence', 'temporal_segment', 'day_type', 'distance', 'time_secs']
+        fields = ['shape', 'sequence', 'temporal_segment', 'day_type', 'distance', 'time_secs', 'timestamp']
 
 
 class HistoricSpeedSerializer(serializers.ModelSerializer):
