@@ -18,7 +18,7 @@ class LoginViewSet(generics.GenericAPIView):
         if not login_serializer.is_valid():
             raise AuthenticationFailed()
         user = login_serializer.context["user"]
-        user.last_login = timezone.now()
+        user.last_login = timezone.localtime()
         user.save()
 
         user_data = UserSerializer(user).data

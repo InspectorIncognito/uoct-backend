@@ -6,9 +6,9 @@ from django.http import JsonResponse, HttpResponse
 from rest_framework import generics
 from rest_framework.permissions import AllowAny
 from processors.models.shapes import shapes_to_geojson
-from rest_api.models import Shape, Segment, GTFSShape, Services, Speed, HistoricSpeed, Stop, AlertThreshold
+from rest_api.models import Shape, Segment, GTFSShape, Services, Speed, HistoricSpeed, Stop, AlertThreshold, Alert
 from rest_api.serializers import ShapeSerializer, SegmentSerializer, GTFSShapeSerializer, ServicesSerializer, \
-    SpeedSerializer, HistoricSpeedSerializer, StopSerializer, AlertThresholdSerializer
+    SpeedSerializer, HistoricSpeedSerializer, StopSerializer, AlertThresholdSerializer, AlertSerializer
 from gtfs_rt.processors.speed import calculate_speed
 import csv
 from geojson import FeatureCollection, Feature, Point
@@ -76,14 +76,23 @@ class GenericSpeedViewSet(viewsets.ModelViewSet, mixins.ListModelMixin):
 
     def get_queryset(self):
         queryset = self.queryset
+        start_time = self.request.query_params.get('startTime')
+        end_time = self.request.query_params.get('endTime')
         month = self.request.query_params.get("month")
         day_type = self.request.query_params.get("dayType")
         temporal_segment = self.request.query_params.get("temporalSegment")
 
         if month is not None:
             month = int(month)
-            year = timezone.now().year
+            year = timezone.localtime().year
             queryset = queryset.filter(timestamp__year=year, timestamp__month=month)
+        if start_time is not None and end_time is not None:
+            start_time = datetime.strptime(start_time, "%Y-%m-%dT%H:%M:%SZ")
+            start_time = timezone.make_aware(start_time, timezone.get_current_timezone())
+            end_time = datetime.strptime(end_time, "%Y-%m-%dT%H:%M:%SZ")
+            end_time = timezone.make_aware(end_time, timezone.get_current_timezone())
+            queryset = queryset.filter(timestamp__gte=start_time, timestamp__lte=end_time)
+
         if day_type is not None:
             queryset = queryset.filter(day_type=day_type)
         if temporal_segment is not None:
@@ -132,6 +141,12 @@ class HistoricSpeedViewSet(GenericSpeedViewSet):
             writer.writerow(obj)
 
         return response
+
+
+class AlertViewSet(viewsets.ModelViewSet):
+    permission_classes = [AllowAny]
+    serializer_class = AlertSerializer
+    queryset = Alert.objects.all()
 
 
 class StopViewSet(viewsets.ModelViewSet):

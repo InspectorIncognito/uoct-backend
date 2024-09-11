@@ -6,7 +6,7 @@ class Command(BaseCommand):
     help = 'With Shapes, Segments and GTFSSegments stored in the DB, this command assigns each route to a segment'
 
     def handle(self, *args, **options):
-        print("Calling assign_routes_to_segments...")
+        print("Calling assign_routes_to_segments command...")
         flush_services_from_db()
         print("DB flushed.")
         assign_routes_to_segments()

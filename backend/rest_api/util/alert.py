@@ -1,5 +1,6 @@
 import datetime
 import json
+import uuid
 
 import requests
 import logging
@@ -20,15 +21,23 @@ class TranSappSiteManager:
     def __init__(self):
         self.server_name = 'https://{0}'.format(config('TRANSAPP_HOST'))
         self.server_username = config('TRANSAPP_SITE_USERNAME')
-        # urls
+
         self.LOGIN_URL = '{0}/login/?next=/'.format(self.server_name)
         self.ALERT_URL = '{0}/adminapp/alert'.format(self.server_name)
         self.LOOKUP_URL = '{0}/adminapp/alert/data'.format(self.server_name)
         self.CREATE_ALERT_URL = "{0}/add".format(self.ALERT_URL)
+
         self.session = self.get_logged_session()
 
     def get_update_alert_url(self, alert_id):
-        return "{0}/{1}".format(self.ALERT_URL, alert_id)
+        return f"{self.ALERT_URL}/{alert_id}"
+
+    def get_delete_alert_url(self, alert_public_id):
+        return f"{self.ALERT_URL}/{alert_public_id}/delete"
+
+    @staticmethod
+    def get_drawtable(start: int = 0, length: int = 10):
+        return f"draw=1&columns[0][data]=activated&columns[0][name]=&columns[0][searchable]=true&columns[0][orderable]=true&columns[0][search][value]=&columns[0][search][regex]=false&columns[1][data]=name&columns[1][name]=&columns[1][searchable]=true&columns[1][orderable]=true&columns[1][search][value]=&columns[1][search][regex]=false&columns[2][data]=start&columns[2][name]=&columns[2][searchable]=true&columns[2][orderable]=true&columns[2][search][value]=&columns[2][search][regex]=false&columns[3][data]=end&columns[3][name]=&columns[3][searchable]=true&columns[3][orderable]=true&columns[3][search][value]=&columns[3][search][regex]=false&columns[4][data]=start_time_day&columns[4][name]=&columns[4][searchable]=true&columns[4][orderable]=true&columns[4][search][value]=&columns[4][search][regex]=false&columns[5][data]=end_time_day&columns[5][name]=&columns[5][searchable]=true&columns[5][orderable]=true&columns[5][search][value]=&columns[5][search][regex]=false&columns[6][data]=week_days&columns[6][name]=&columns[6][searchable]=true&columns[6][orderable]=true&columns[6][search][value]=&columns[6][search][regex]=false&columns[7][data]=stop_number&columns[7][name]=&columns[7][searchable]=true&columns[7][orderable]=true&columns[7][search][value]=&columns[7][search][regex]=false&columns[8][data]=useful&columns[8][name]=&columns[8][searchable]=true&columns[8][orderable]=false&columns[8][search][value]=&columns[8][search][regex]=false&columns[9][data]=useless&columns[9][name]=&columns[9][searchable]=true&columns[9][orderable]=false&columns[9][search][value]=&columns[9][search][regex]=false&columns[10][data]=&columns[10][name]=&columns[10][searchable]=true&columns[10][orderable]=false&columns[10][search][value]=&columns[10][search][regex]=false&order[0][column]=0&order[0][dir]=asc&start={start}&length={length}&search[regex]=false&_=1564452662157"
 
     def get_logged_session(self):
         payload = {
@@ -70,29 +79,62 @@ class TranSappSiteManager:
         return self.session.post(update_alert_url, data=payload, cookies=res.cookies)
 
     def alert_lookup(self, alert_name: str):
-        url = '{0}{1}{2}'.format(self.LOOKUP_URL,
-                                 '?draw=1&columns%5B0%5D%5Bdata%5D=activated&columns%5B0%5D%5Bname%5D=&columns%5B0%5D%5Bsearchable%5D=true&columns%5B0%5D%5Borderable%5D=true&columns%5B0%5D%5Bsearch%5D%5Bvalue%5D=&columns%5B0%5D%5Bsearch%5D%5Bregex%5D=false&columns%5B1%5D%5Bdata%5D=name&columns%5B1%5D%5Bname%5D=&columns%5B1%5D%5Bsearchable%5D=true&columns%5B1%5D%5Borderable%5D=true&columns%5B1%5D%5Bsearch%5D%5Bvalue%5D=&columns%5B1%5D%5Bsearch%5D%5Bregex%5D=false&columns%5B2%5D%5Bdata%5D=start&columns%5B2%5D%5Bname%5D=&columns%5B2%5D%5Bsearchable%5D=true&columns%5B2%5D%5Borderable%5D=true&columns%5B2%5D%5Bsearch%5D%5Bvalue%5D=&columns%5B2%5D%5Bsearch%5D%5Bregex%5D=false&columns%5B3%5D%5Bdata%5D=end&columns%5B3%5D%5Bname%5D=&columns%5B3%5D%5Bsearchable%5D=true&columns%5B3%5D%5Borderable%5D=true&columns%5B3%5D%5Bsearch%5D%5Bvalue%5D=&columns%5B3%5D%5Bsearch%5D%5Bregex%5D=false&columns%5B4%5D%5Bdata%5D=start_time_day&columns%5B4%5D%5Bname%5D=&columns%5B4%5D%5Bsearchable%5D=true&columns%5B4%5D%5Borderable%5D=true&columns%5B4%5D%5Bsearch%5D%5Bvalue%5D=&columns%5B4%5D%5Bsearch%5D%5Bregex%5D=false&columns%5B5%5D%5Bdata%5D=end_time_day&columns%5B5%5D%5Bname%5D=&columns%5B5%5D%5Bsearchable%5D=true&columns%5B5%5D%5Borderable%5D=true&columns%5B5%5D%5Bsearch%5D%5Bvalue%5D=&columns%5B5%5D%5Bsearch%5D%5Bregex%5D=false&columns%5B6%5D%5Bdata%5D=week_days&columns%5B6%5D%5Bname%5D=&columns%5B6%5D%5Bsearchable%5D=true&columns%5B6%5D%5Borderable%5D=true&columns%5B6%5D%5Bsearch%5D%5Bvalue%5D=&columns%5B6%5D%5Bsearch%5D%5Bregex%5D=false&columns%5B7%5D%5Bdata%5D=stop_number&columns%5B7%5D%5Bname%5D=&columns%5B7%5D%5Bsearchable%5D=true&columns%5B7%5D%5Borderable%5D=true&columns%5B7%5D%5Bsearch%5D%5Bvalue%5D=&columns%5B7%5D%5Bsearch%5D%5Bregex%5D=false&columns%5B8%5D%5Bdata%5D=useful&columns%5B8%5D%5Bname%5D=&columns%5B8%5D%5Bsearchable%5D=true&columns%5B8%5D%5Borderable%5D=false&columns%5B8%5D%5Bsearch%5D%5Bvalue%5D=&columns%5B8%5D%5Bsearch%5D%5Bregex%5D=false&columns%5B9%5D%5Bdata%5D=useless&columns%5B9%5D%5Bname%5D=&columns%5B9%5D%5Bsearchable%5D=true&columns%5B9%5D%5Borderable%5D=false&columns%5B9%5D%5Bsearch%5D%5Bvalue%5D=&columns%5B9%5D%5Bsearch%5D%5Bregex%5D=false&columns%5B10%5D%5Bdata%5D=&columns%5B10%5D%5Bname%5D=&columns%5B10%5D%5Bsearchable%5D=true&columns%5B10%5D%5Borderable%5D=false&columns%5B10%5D%5Bsearch%5D%5Bvalue%5D=&columns%5B10%5D%5Bsearch%5D%5Bregex%5D=false&order%5B0%5D%5Bcolumn%5D=0&order%5B0%5D%5Bdir%5D=asc&start=0&length=10&search%5Bvalue%5D=&search%5Bregex%5D=false&_=1564452662157',
-                                 f'search[value]={alert_name}'
-                                 )
+        url = f'{self.LOOKUP_URL}?{self.get_drawtable()}&search[value]={alert_name}'
         response_raw = self.session.get(url)
         response_json = json.loads(response_raw.content.decode())
         return response_json
+
+    def get_all_alerts(self) -> list:
+        query = 'search[value]=Speed Anomaly'
+        url = f'{self.LOOKUP_URL}?{self.get_drawtable()}&{query}'
+        response_raw = self.session.get(url)
+        response_json = json.loads(response_raw.content.decode())
+        records_total = response_json['recordsTotal']
+        site_alerts = response_json['data']
+        if records_total > len(site_alerts):
+            start = len(site_alerts)
+            length = records_total - start
+            url = f'{self.LOOKUP_URL}?{self.get_drawtable(start=start, length=length)}&{query}'
+            response_rest_site_alerts_raw = self.session.get(url)
+            rest_site_alerts_json = json.loads(response_rest_site_alerts_raw.content.decode())
+            rest_site_alerts = rest_site_alerts_json['data']
+            site_alerts = site_alerts + rest_site_alerts
+        return site_alerts
+
+    def alert_delete(self, alert_public_id):
+        alert_delete_url = self.get_delete_alert_url(alert_public_id)
+        payload = {}
+        res = self.session.get(self.LOGIN_URL)
+        csrf_token = res.cookies['csrftoken']
+        payload['csrfmiddlewaretoken'] = csrf_token
+
+        return self.session.post(alert_delete_url, data=payload)
+
+    def delete_all_alerts(self):
+        site_alerts = self.get_all_alerts()
+        for site_data in site_alerts:
+            name = site_data['name']
+            if "Speed Anomaly" not in name:
+                print("Passed alert", name)
+                continue
+            alert_public_id = site_data['public_id']
+            delete_response = self.alert_delete(alert_public_id)
 
 
 def create_alert_to_admin(site_manager: TranSappSiteManager, alert_obj: Alert):
     segment = alert_obj.segment
     speed = alert_obj.detected_speed
     alert_data = create_alert_data(segment, speed)
-    site_manager.create_alert(alert_data)
+    return site_manager.create_alert(alert_data)
 
 
-def update_alert_from_admin(site_manager: TranSappSiteManager, alert_obj: Alert, alert_data: dict):
+def update_alert_from_admin(site_manager: TranSappSiteManager, alert_obj: Alert, alert_data: dict, activated=True):
     segment = alert_obj.segment
     speed = alert_obj.detected_speed
     alert_public_id = alert_data['public_id']
 
-    new_end = timezone.now().strftime('%Y-%m-%d')
-    delta = timedelta(minutes=15)
+    new_end = timezone.localtime().strftime('%Y-%m-%d')
+    delta = timedelta(minutes=20)
     new_end_time_day = str((datetime.datetime.strptime(alert_data['end_time_day'], '%H:%M:%S') + delta).time())[:-3]
 
     alert_data = create_alert_data(segment, speed)
@@ -102,10 +144,11 @@ def update_alert_from_admin(site_manager: TranSappSiteManager, alert_obj: Alert,
         end=new_end,
         start_day_time=alert_data['start_time_day'],
         end_day_time=new_end_time_day,
+        activated=activated
     )
     alert_data.update(new_alert_data)
 
-    site_manager.update_alert(alert_data, alert_public_id)
+    return site_manager.update_alert(alert_data, alert_id=alert_public_id)
 
 
 def create_alert_data(segment: Segment, speed: Speed):
@@ -121,7 +164,7 @@ def create_alert_data(segment: Segment, speed: Speed):
     alert_data['end'] = str(now.date())
 
     start_time_day = now.time()
-    end_time_day = (now + timedelta(minutes=30)).time()
+    end_time_day = (now + timedelta(minutes=20)).time()
     alert_data['start_time_day'] = f"{start_time_day.hour:02}:{start_time_day.minute:02}"
     alert_data['end_time_day'] = f"{end_time_day.hour:02}:{end_time_day.minute:02}"
 
@@ -146,17 +189,17 @@ def create_alert_data(segment: Segment, speed: Speed):
         """.format(alert_url)
     alert_data['stops'] = [json.dumps(dict(label="Affected Stops", value='|'.join(stops)))]
 
-    alert_data['activated'] = False
+    alert_data['activated'] = True
     alert_data['author'] = ALERT_AUTHOR
 
     return alert_data
 
 
 def create_alerts():
-    print("Calling create_alerts...")
     now = timezone.localtime()
     end_time = now.replace(second=0, microsecond=0)
     delta = timedelta(minutes=15)
+    today = now.replace(hour=0, minute=0, second=0, microsecond=0)
 
     start_time = end_time - delta
     day_type = get_day_type(start_time)
@@ -165,8 +208,8 @@ def create_alerts():
     alert_threshold = AlertThreshold.objects.first().threshold
 
     for segment in segments:
-        speed = Speed.objects.filter(segment=segment, day_type=day_type, temporal_segment=temporal_segment,
-                                     timestamp__gte=start_time, timestamp__lte=end_time).first()
+        speed = Speed.objects.filter(segment=segment, day_type=day_type, timestamp__date=today,
+                                     temporal_segment=temporal_segment).first()
         if speed is None:
             continue
         historic_speed = HistoricSpeed.objects.filter(segment=segment, day_type=day_type,
@@ -181,27 +224,73 @@ def create_alerts():
             alert_obj_data = {
                 "segment": segment,
                 "detected_speed": speed,
-                "temporal_segment": temporal_segment
+                "temporal_segment": temporal_segment,
             }
             Alert.objects.create(**alert_obj_data)
 
 
-def send_alerts():
-    print("Calling send_alerts...")
+def search_alert_by_uuid(alert_data: dict, segment_uuid: uuid.UUID) -> dict or None:
+    for alert in alert_data:
+        alert_name = alert['name']
+        segment_id = uuid.UUID(alert_name.split(' ')[-1])
+        if segment_id == segment_uuid:
+            return alert
+    return None
+
+
+def search_alert_obj(segment_uuid):
+    return Alert.objects.filter(segment__segment_id=segment_uuid).first()
+
+
+def update_alerts(site_manager: TranSappSiteManager):
+    print("Calling update_alerts command...")
     end_time = timezone.localtime()
-    delta = timedelta(minutes=15)
-    start_time = end_time - delta
-    site_manager = TranSappSiteManager()
+    start_time = end_time - timedelta(minutes=15)
+    temporal_segment = get_temporal_segment(start_time)
 
-    alerts = Alert.objects.filter(timestamp__gte=start_time, timestamp__lte=end_time)
+    alerts = Alert.objects.filter(timestamp__date=start_time.date(), temporal_segment=temporal_segment)
+    alert_data = site_manager.get_all_alerts()
     for alert in alerts:
-        segment = alert.segment
-        segment_uuid = segment.segment_id
-        alert_search_response = site_manager.alert_lookup(segment_uuid)
-        data = alert_search_response['data']
-        if len(data) > 0:  # Check if the alert already exists in TranSapp's admin
-            alert_data = data[0]
-            update_alert_from_admin(site_manager, alert, alert_data)
-
-        else:  # The alert doesn't exist, create it instead
+        segment_uuid = alert.segment.segment_id
+        site_alert = search_alert_by_uuid(alert_data, segment_uuid)
+        if site_alert is not None:
+            alert.useful = site_alert.get('useful')
+            alert.useless = site_alert.get('useless')
+            alert.save()
+            site_alert['checked'] = True
+        else:  # Send a new alert to TranSapp's Admin
             create_alert_to_admin(site_manager, alert)
+
+    for site_alert in alert_data:
+        is_checked = site_alert.get('checked', False)
+        segment_uuid = site_alert.get('name').split(' ')[-1]
+        alert_obj = search_alert_obj(segment_uuid)
+        if alert_obj is None:
+            continue
+        if is_checked:
+            update_alert_from_admin(site_manager, alert_obj=alert_obj, alert_data=site_alert)
+        else:
+            if site_alert.get('activated', False):
+                update_alert_from_admin(site_manager, alert_obj, site_alert, activated=False)
+
+
+def get_active_alerts():
+    end_time = timezone.localtime()
+    start_time = end_time - timedelta(minutes=15)
+    today = end_time.replace(hour=0, minute=0, second=0, microsecond=0)
+    temporal_segment = get_temporal_segment(start_time)
+    alerts = Alert.objects.filter(timestamp__gte=today, temporal_segment=temporal_segment)
+    active_alerts = []
+    for alert in alerts:
+        key_value = alert.get_key_value()
+        useful = alert.useful
+        useless = alert.useless
+        mid_point = alert.segment.get_middle_point()
+        data = dict(
+            coords=mid_point,
+            key_value=key_value,
+            useful=useful,
+            useless=useless,
+        )
+        active_alerts.append(data)
+    return active_alerts

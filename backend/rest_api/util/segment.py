@@ -56,5 +56,3 @@ class SegmentManager:
                     "longitude": stop['geometry'].coords[0][0]
                 }
                 Stop.objects.create(**stop_data)
-
-        print("Stop objects created")

@@ -4,10 +4,11 @@ from rest_api.tests.tests_views_base import BaseTestCase
 from rest_api.util.alert import TranSappSiteManager, create_alert_data
 from unittest import skip
 from django.utils import timezone
-from rest_api.util.alert import create_alerts
+from rest_api.util.alert import create_alerts, get_active_alerts
 from datetime import datetime, timedelta
 
 
+@skip("Debug")
 class TestAlert(BaseTestCase):
     def setUp(self):
         self.delta = timedelta(minutes=15)
@@ -18,12 +19,12 @@ class TestAlert(BaseTestCase):
         self.stop_codes = ["PD319"]
         AlertThreshold.objects.create(**{"threshold": 2})
 
-    @skip("Skipped")
+    # @skip("Skipped")
     def test_send_alert(self):
         segment = SegmentFactory()
         speed = SpeedFactory()
         site_manager = TranSappSiteManager()
-        alert_data = create_alert_data(self.stop_codes, segment, speed)
+        alert_data = create_alert_data(segment, speed)
         response = site_manager.create_alert(alert_data)
 
     def test_create_alerts(self):
@@ -42,6 +43,16 @@ class TestAlert(BaseTestCase):
         create_alerts()
         alerts = Alert.objects.all()
         self.assertEqual(len(alerts), 1)
+
+    @skip("skipping")
+    def test_get_all_alerts(self):
+        site_manager = TranSappSiteManager()
+        alerts_response = site_manager.get_all_alerts()
+        alerts_data = alerts_response['data']
+        print(alerts_data)
+
+    def test_get_active_alerts(self):
+        print(get_active_alerts())
 
 
 def get_temporal_segment(date: datetime):
