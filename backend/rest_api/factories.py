@@ -36,7 +36,7 @@ class SpeedFactory(factory.django.DjangoModelFactory):
         model = Speed
 
     segment = factory.SubFactory(SegmentFactory)
-    temporal_segment = factory.Faker('int')
+    temporal_segment = 1
     distance = 100
     time_secs = 5
     day_type = "L"

@@ -116,7 +116,7 @@ class SpeedViewSet(GenericSpeedViewSet):
         response = HttpResponse(content_type='text/csv')
         response['Content-Disposition'] = 'attachment; filename="segment_speeds.csv"'
         serializer = self.get_serializer(queryset, many=True)
-        fieldnames = ['shape', 'sequence', 'temporal_segment', 'day_type', 'distance', 'time_secs']
+        fieldnames = ['timestamp', 'shape', 'sequence', 'temporal_segment', 'day_type', 'distance', 'time_secs']
         writer = csv.DictWriter(response, fieldnames=fieldnames)
         writer.writeheader()
         for obj in serializer.data:
