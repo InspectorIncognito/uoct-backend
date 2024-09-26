@@ -1,5 +1,4 @@
 import datetime
-import uuid
 
 import factory
 from rest_api.models import Speed, Shape, Segment, HistoricSpeed, Stop, Alert
@@ -37,6 +36,7 @@ class SpeedFactory(factory.django.DjangoModelFactory):
         model = Speed
 
     segment = factory.SubFactory(SegmentFactory)
+    temporal_segment = 1
     distance = 100
     time_secs = 5
     day_type = "L"

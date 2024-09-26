@@ -2,7 +2,7 @@ from datetime import datetime
 
 from django.utils import timezone
 from rest_framework import viewsets, mixins
-from django.http import JsonResponse, HttpResponse
+from django.http import JsonResponse, HttpResponse, StreamingHttpResponse
 from rest_framework import generics
 from rest_framework.permissions import AllowAny
 from processors.models.shapes import shapes_to_geojson
@@ -100,27 +100,44 @@ class GenericSpeedViewSet(viewsets.ModelViewSet, mixins.ListModelMixin):
         queryset = queryset.order_by("segment", "temporal_segment")
         return queryset
 
+    @staticmethod
+    def csv_generator(queryset, fieldnames_dict):
+        yield ','.join(list(fieldnames_dict.values())) + '\n'
+        for obj in queryset:
+            fieldnames = list(fieldnames_dict.keys())
+            row = [str(obj[field]) for field in fieldnames]
+            yield ','.join(row) + '\n'
+
 
 class SpeedViewSet(GenericSpeedViewSet):
     serializer_class = SpeedSerializer
     queryset = Speed.objects.all().order_by('-temporal_segment')
 
     def to_csv(self, request, *args, **kwargs):
-        queryset = self.get_queryset()
+        queryset = self.get_queryset().values(
+            'segment__shape',
+            'segment__sequence',
+            'temporal_segment',
+            'day_type',
+            'distance',
+            'time_secs'
+        )
         start_date = request.query_params.get('start_date', None)
         if start_date is not None:
             start_date = datetime.strptime(start_date, '%Y-%d-%mT%H:%M:%S')
             start_date = timezone.make_aware(start_date, timezone.get_current_timezone())
             queryset = queryset.filter(timestamp__gte=start_date)
 
-        response = HttpResponse(content_type='text/csv')
+        fieldnames_dict = dict(
+            segment__shape='shape',
+            segment__sequence='sequence',
+            temporal_segment='temporal_segment',
+            day_type='day_type',
+            distance='distance',
+            time_secs='time_secs'
+        )
+        response = StreamingHttpResponse(self.csv_generator(queryset, fieldnames_dict), content_type='text/csv')
         response['Content-Disposition'] = 'attachment; filename="segment_speeds.csv"'
-        serializer = self.get_serializer(queryset, many=True)
-        fieldnames = ['shape', 'sequence', 'temporal_segment', 'day_type', 'distance', 'time_secs']
-        writer = csv.DictWriter(response, fieldnames=fieldnames)
-        writer.writeheader()
-        for obj in serializer.data:
-            writer.writerow(obj)
 
         return response
 
@@ -130,16 +147,22 @@ class HistoricSpeedViewSet(GenericSpeedViewSet):
     queryset = HistoricSpeed.objects.all().order_by("segment")
 
     def to_csv(self, request, *args, **kwargs):
-        queryset = self.get_queryset()
-        response = HttpResponse(content_type='text/csv')
+        queryset = self.get_queryset().values(
+            'segment__shape',
+            'segment__sequence',
+            'temporal_segment',
+            'day_type',
+            'speed'
+        )
+        fieldnames_dict = dict(
+            segment__shape='shape',
+            segment__sequence='sequence',
+            temporal_segment='temporal_segment',
+            day_type='day_type',
+            speed='speed'
+        )
+        response = StreamingHttpResponse(self.csv_generator(queryset, fieldnames_dict), content_type='text/csv')
         response['Content-Disposition'] = 'attachment; filename="segment_speeds.csv"'
-        serializer = self.get_serializer(queryset, many=True)
-        fieldnames = ['shape', 'sequence', 'temporal_segment', 'day_type', 'speed']
-        writer = csv.DictWriter(response, fieldnames=fieldnames)
-        writer.writeheader()
-        for obj in serializer.data:
-            writer.writerow(obj)
-
         return response
 
 
