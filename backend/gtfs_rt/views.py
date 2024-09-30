@@ -1,9 +1,19 @@
 from datetime import datetime, timedelta
+
+from django.http import JsonResponse
 from rest_framework import viewsets
 from gtfs_rt.models import GPSPulse
 from gtfs_rt.serializers import GTFSRTSerializer
 from rest_framework.permissions import AllowAny
 from gtfs_rt.config import TIMEZONE
+from django.utils import timezone
+
+from gtfs_rt.utils import get_temporal_segment, get_temporal_range
+from geojson import FeatureCollection, Feature, Point
+
+from rest_api.util.shape import ShapeManager
+from django.db.models.functions import Concat
+from django.db.models import F, Value, CharField
 
 
 class GTFSRTViewSet(viewsets.ModelViewSet):
@@ -22,7 +32,30 @@ class GTFSRTViewSet(viewsets.ModelViewSet):
             end_date = datetime.strptime(end_date, '%Y-%m-%dT%H:%M:%SZ').astimezone(TIMEZONE)
             queryset = queryset.filter(timestamp__gte=start_date, timestamp__lte=end_date).order_by("route_id")
         else:
-            end_datetime = datetime.now().astimezone(TIMEZONE)
-            start_datetime = end_datetime - delta_time
-            queryset = queryset.filter(timestamp__gte=start_datetime, timestamp__lte=end_datetime).order_by("route_id")
+            now = timezone.localtime()
+            previous_15_minutes = now - delta_time
+            previous_temporal_segment = get_temporal_segment(previous_15_minutes)
+            start_date, end_date = get_temporal_range(previous_temporal_segment)
+            queryset = queryset.filter(timestamp__gte=start_date, timestamp__lte=end_date).order_by("route_id")
+        shape_manager = ShapeManager()
+        all_services = shape_manager.get_all_services()
+        # queryset = queryset.filter(route_id__in=all_services)
         return queryset
+
+    def to_geojson(self, request):
+        shape_manager = ShapeManager()
+        all_services = list(shape_manager.get_all_services())
+
+        queryset = (self.get_queryset()
+                    .values('route_id', 'latitude', 'longitude')
+                    .annotate(service=Concat(F('route_id'), Value("I") if F('direction') else Value("R"),
+                                             output_field=CharField()))
+                    .order_by('route_id')
+                    )
+        queryset = queryset.filter(service__in=all_services)
+        geojson_data = []
+        for gps in queryset:
+            gps_geojson = Feature(geometry=Point(coordinates=[gps['longitude'], gps['latitude']]),
+                                  properties={'service': gps['service']})
+            geojson_data.append(gps_geojson)
+        return JsonResponse(FeatureCollection(features=geojson_data), safe=False)

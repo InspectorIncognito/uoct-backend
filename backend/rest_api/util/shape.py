@@ -37,6 +37,14 @@ class ShapeManager:
             ]
         )
 
+    def get_all_services(self):
+        services = set()
+        for shape in self.shapes:
+            segments = shape.get_segments()
+            for segment in segments:
+                services.update(segment.get_services())
+        return services
+
 
 def flush_shape_objects():
     Shape.objects.all().delete()

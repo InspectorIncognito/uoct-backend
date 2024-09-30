@@ -56,6 +56,12 @@ class Shape(models.Model):
             total_distance += distance
         return int(total_distance)
 
+    def get_services_set(self):
+        services_set = set()
+        segments = self.get_segments()
+        for segment in segments:
+            services_set.update(segment.get_services())
+
     def __str__(self):
         return f"'{self.name}'"
 
@@ -129,6 +135,9 @@ class Segment(models.Model):
         if stops_query.count() == 0:
             return []
         return [stop.stop_id for stop in stops_query]
+
+    def get_services(self):
+        return Services.objects.get(segment=self).services
 
 
 class Stop(models.Model):
