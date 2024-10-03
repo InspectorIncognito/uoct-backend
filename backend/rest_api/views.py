@@ -1,9 +1,10 @@
 from datetime import datetime
 
-from django.db.models import F
+from django.db.models import F, ExpressionWrapper, FloatField
+from django.db.models.functions import Round
 from django.utils import timezone
 from rest_framework import viewsets, mixins
-from django.http import JsonResponse, HttpResponse, StreamingHttpResponse
+from django.http import JsonResponse, StreamingHttpResponse
 from rest_framework import generics
 from rest_framework.permissions import AllowAny
 
@@ -13,7 +14,6 @@ from rest_api.models import Shape, Segment, GTFSShape, Services, Speed, Historic
 from rest_api.serializers import ShapeSerializer, SegmentSerializer, GTFSShapeSerializer, ServicesSerializer, \
     SpeedSerializer, HistoricSpeedSerializer, StopSerializer, AlertThresholdSerializer, AlertSerializer
 from gtfs_rt.processors.speed import calculate_speed
-import csv
 from geojson import FeatureCollection, Feature, Point
 
 from velocity.gtfs import GTFSManager
@@ -185,11 +185,13 @@ class AlertViewSet(viewsets.ModelViewSet):
         queryset = self.get_queryset().annotate(
             shape=F('segment__shape'),
             sequence=F('segment__sequence'),
+            speed=ExpressionWrapper(Round(F('detected_speed__distance') / F('detected_speed__time_secs'), 2),
+                                    output_field=FloatField()),
             date=F('timestamp__date')
         ).values(
             'shape',
             'sequence',
-            'detected_speed',
+            'speed',
             'temporal_segment',
             'useful',
             'useless',
@@ -197,7 +199,7 @@ class AlertViewSet(viewsets.ModelViewSet):
         )
         if len(self.request.query_params) == 0:
             previous_date, previous_temporal_segment = get_previous_temporal_segment()
-            queryset = queryset.filter(timestamp__date=previous_date, temporal_segment=previous_temporal_segment)
+            # queryset = queryset.filter(timestamp__date=previous_date, temporal_segment=previous_temporal_segment)
         response = dict(
             count=queryset.count(),
             results=queryset
