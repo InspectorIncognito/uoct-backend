@@ -1,10 +1,13 @@
 from datetime import datetime
 
+from django.db.models import F
 from django.utils import timezone
 from rest_framework import viewsets, mixins
 from django.http import JsonResponse, HttpResponse, StreamingHttpResponse
 from rest_framework import generics
 from rest_framework.permissions import AllowAny
+
+from gtfs_rt.utils import get_previous_temporal_segment, get_previous_month
 from processors.models.shapes import shapes_to_geojson
 from rest_api.models import Shape, Segment, GTFSShape, Services, Speed, HistoricSpeed, Stop, AlertThreshold, Alert
 from rest_api.serializers import ShapeSerializer, SegmentSerializer, GTFSShapeSerializer, ServicesSerializer, \
@@ -78,9 +81,9 @@ class GenericSpeedViewSet(viewsets.ModelViewSet, mixins.ListModelMixin):
         queryset = self.queryset
         start_time = self.request.query_params.get('startTime')
         end_time = self.request.query_params.get('endTime')
-        month = self.request.query_params.get("month")
-        day_type = self.request.query_params.get("dayType")
-        temporal_segment = self.request.query_params.get("temporalSegment")
+        month = self.request.query_params.get('month')
+        day_type = self.request.query_params.get('dayType')
+        temporal_segment = self.request.query_params.get('temporalSegment')
 
         if month is not None:
             month = int(month)
@@ -105,7 +108,11 @@ class GenericSpeedViewSet(viewsets.ModelViewSet, mixins.ListModelMixin):
         yield ','.join(list(fieldnames_dict.values())) + '\n'
         for obj in queryset:
             fieldnames = list(fieldnames_dict.keys())
-            row = [str(obj[field]) for field in fieldnames]
+            row = []
+            for field in fieldnames:
+                if field == 'timestamp':
+                    obj[field] = timezone.localtime(obj[field])
+                row.append(str(obj[field]))
             yield ','.join(row) + '\n'
 
 
@@ -114,27 +121,27 @@ class SpeedViewSet(GenericSpeedViewSet):
     queryset = Speed.objects.all().order_by('-temporal_segment')
 
     def to_csv(self, request, *args, **kwargs):
+        query_params = request.query_params
         queryset = self.get_queryset().values(
             'segment__shape',
             'segment__sequence',
             'temporal_segment',
             'day_type',
             'distance',
-            'time_secs'
+            'time_secs',
+            'timestamp'
         )
-        start_date = request.query_params.get('start_date', None)
-        if start_date is not None:
-            start_date = datetime.strptime(start_date, '%Y-%d-%mT%H:%M:%S')
-            start_date = timezone.make_aware(start_date, timezone.get_current_timezone())
-            queryset = queryset.filter(timestamp__gte=start_date)
-
+        if len(query_params) == 0:
+            previous_date, previous_temporal_segment = get_previous_temporal_segment()
+            queryset = queryset.filter(timestamp__date=previous_date, temporal_segment=previous_temporal_segment)
         fieldnames_dict = dict(
             segment__shape='shape',
             segment__sequence='sequence',
             temporal_segment='temporal_segment',
             day_type='day_type',
             distance='distance',
-            time_secs='time_secs'
+            time_secs='time_secs',
+            timestamp='timestamp'
         )
         response = StreamingHttpResponse(self.csv_generator(queryset, fieldnames_dict), content_type='text/csv')
         response['Content-Disposition'] = 'attachment; filename="segment_speeds.csv"'
@@ -154,6 +161,9 @@ class HistoricSpeedViewSet(GenericSpeedViewSet):
             'day_type',
             'speed'
         )
+        if len(request.query_params) == 0:
+            previous_month = get_previous_month()
+            queryset = queryset.filter(timestamp__month=previous_month)
         fieldnames_dict = dict(
             segment__shape='shape',
             segment__sequence='sequence',
@@ -170,6 +180,29 @@ class AlertViewSet(viewsets.ModelViewSet):
     permission_classes = [AllowAny]
     serializer_class = AlertSerializer
     queryset = Alert.objects.all()
+
+    def active(self, request, *args, **kwargs):
+        queryset = self.get_queryset().annotate(
+            shape=F('segment__shape'),
+            sequence=F('segment__sequence'),
+            date=F('timestamp__date')
+        ).values(
+            'shape',
+            'sequence',
+            'detected_speed',
+            'temporal_segment',
+            'useful',
+            'useless',
+            'date'
+        )
+        if len(self.request.query_params) == 0:
+            previous_date, previous_temporal_segment = get_previous_temporal_segment()
+            queryset = queryset.filter(timestamp__date=previous_date, temporal_segment=previous_temporal_segment)
+        response = dict(
+            count=queryset.count(),
+            results=queryset
+        )
+        return Response(response)
 
 
 class StopViewSet(viewsets.ModelViewSet):
