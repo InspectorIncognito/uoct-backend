@@ -199,7 +199,7 @@ class AlertViewSet(viewsets.ModelViewSet):
         )
         if len(self.request.query_params) == 0:
             previous_date, previous_temporal_segment = get_previous_temporal_segment()
-            # queryset = queryset.filter(timestamp__date=previous_date, temporal_segment=previous_temporal_segment)
+            queryset = queryset.filter(timestamp__date=previous_date, temporal_segment=previous_temporal_segment)
         response = dict(
             count=queryset.count(),
             results=queryset
