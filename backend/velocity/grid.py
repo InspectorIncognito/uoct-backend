@@ -1,6 +1,7 @@
 import math
 from typing import Dict, Tuple
 
+from gtfs_rt.services import get_gps_data_from_last_15_minutes
 from rest_api.util.shape import ShapeManager
 from processors.geometry.point import Point
 from typing import List
@@ -8,7 +9,8 @@ from rest_api.models import Segment
 from shapely.geometry import LineString as shp_LineString
 from processors.geometry.line import PolylineSegment
 from gtfs_rt.models import GPSPulse
-
+import geopandas as gpd
+from geojson import Feature, Point
 DISTANCE_THRESHOLD = 25  # meters
 
 
@@ -42,7 +44,23 @@ class GridManager(Dict[Tuple[int, int], GridCell]):
         self.grid = None
         self.bbox = None
 
-    def filter_gps(self, start_date, end_date):
+    def get_gps_gdf(self, queryset):
+        features = list(
+            map(
+                lambda gps: Feature(geometry=Point(coordinates=[gps['longitude'], gps['latitude']])),
+                queryset
+            )
+        )
+        gdf = gpd.GeoDataFrame.from_features(features)
+        return gdf
+
+    def filter_gps(self, start_date=None, end_date=None):
+        queryset = get_gps_data_from_last_15_minutes()
+        gps_gdf = self.get_gps_gdf(queryset)
+        buffered_shape = self.shape_manager.get_buffered_shape()
+        filtered_gps = gps_gdf[gps_gdf.geometry.within(buffered_shape)]
+        return filtered_gps
+
         grid_min_lon, grid_min_lat, grid_max_lon, grid_max_lat = self.get_bbox()
         filter_query = {
             "timestamp__gte": start_date,

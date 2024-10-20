@@ -1,7 +1,8 @@
 from rest_api.models import Shape, Segment
 from velocity.constants import DEG_PI, DEG_PI_HALF
 from typing import Dict, List
-from geojson import FeatureCollection
+from geojson import FeatureCollection, Feature, LineString
+import geopandas as gpd
 
 
 class ShapeManager:
@@ -44,6 +45,18 @@ class ShapeManager:
             for segment in segments:
                 services.update(segment.get_services())
         return services
+
+    def get_buffered_shape(self):
+        segment_data = self.get_segments()
+        features = []
+        for shape in segment_data:
+            for segment in segment_data[shape]:
+                geometry = segment.geometry
+                features.append(Feature(geometry=LineString(coordinates=geometry)))
+        gdf = gpd.GeoDataFrame.from_features(features)
+        gdf['geometry'] = gdf['geometry'].buffer(distance=0.0001, cap_style='flat')
+        polygon_gdf = gdf.union_all()
+        return polygon_gdf
 
 
 def flush_shape_objects():
