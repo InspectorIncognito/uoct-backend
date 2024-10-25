@@ -24,5 +24,7 @@ class Command(BaseCommand):
         call_command('assign_stops_to_segments')
         # Set alert threshold value
         call_command('set_alert_threshold')
+        # Set gtfs rt timestamp manager
+        call_command('set_gtfs_rt_timestamp_manager')
 
         print("initialize_map_data command finished.")

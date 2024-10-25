@@ -261,3 +261,7 @@ class GTFSShape(models.Model):
                 'direction': str(self.direction)
             }
         )
+
+
+class GTFSRTTimestamp(SingletonModel):
+    last_timestamp = models.CharField(default='', max_length=124)

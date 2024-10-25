@@ -6,6 +6,7 @@ from django.http import JsonResponse, HttpResponse, StreamingHttpResponse
 from rest_framework import generics
 from rest_framework.permissions import AllowAny
 
+from gtfs_rt.processors.manager import GTFSRTManager
 from gtfs_rt.services import get_gps_data_from_last_15_minutes
 from processors.models.shapes import shapes_to_geojson
 from rest_api.models import Shape, Segment, GTFSShape, Services, Speed, HistoricSpeed, Stop, AlertThreshold, Alert
