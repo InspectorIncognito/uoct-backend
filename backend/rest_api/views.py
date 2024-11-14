@@ -1,14 +1,13 @@
 from datetime import datetime
-
-from django.db.models import F, ExpressionWrapper, FloatField
-from django.db.models.functions import Round
+import json
 from django.utils import timezone
 from rest_framework import viewsets, mixins
 from django.http import JsonResponse, StreamingHttpResponse
 from rest_framework import generics
 from rest_framework.permissions import AllowAny
 
-from gtfs_rt.utils import get_previous_temporal_segment, get_previous_month
+from gtfs_rt.processors.manager import GTFSRTManager
+from gtfs_rt.services import get_gps_data_from_last_15_minutes
 from processors.models.shapes import shapes_to_geojson
 from rest_api.models import Shape, Segment, GTFSShape, Services, Speed, HistoricSpeed, Stop, AlertThreshold, Alert
 from rest_api.serializers import ShapeSerializer, SegmentSerializer, GTFSShapeSerializer, ServicesSerializer, \
@@ -16,11 +15,28 @@ from rest_api.serializers import ShapeSerializer, SegmentSerializer, GTFSShapeSe
 from gtfs_rt.processors.speed import calculate_speed
 from geojson import FeatureCollection, Feature, Point
 
+from velocity.grid import GridManager
 from velocity.gtfs import GTFSManager
 from rest_framework.response import Response
 
 
-# Create your views here.
+class TestView(generics.GenericAPIView):
+    permission_classes = [AllowAny]
+
+    def get(self, request, *args, **kwargs):
+        gm = GridManager()
+        filtered_gps = gm.filter_gps()
+        response = dict(count=len(filtered_gps), data=json.loads(filtered_gps.to_json()))
+
+        #gm = GTFSManager()
+        #shapes_reader = gm.shapes_reader
+        #df = shapes_reader.load_csv_file_as_df()
+        #processed_df = shapes_reader.process_df(df)
+        #response = json.loads(processed_df.to_json())
+
+        return JsonResponse(data=response, safe=False)
+
+
 class GeoJSONViewSet(generics.GenericAPIView):
     permission_classes = [AllowAny]
 

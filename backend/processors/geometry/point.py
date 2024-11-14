@@ -1,7 +1,6 @@
 import math
 from typing import Tuple
 
-from processors.geometry.constants import EARTH_RADIUS_KM
 from haversine import haversine, Unit
 
 

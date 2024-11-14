@@ -1,13 +1,19 @@
 import math
 from typing import Dict, Tuple
 
+from django.utils import timezone
+
+from gtfs_rt.models import GPSPulse
+from gtfs_rt.services import get_gps_data_from_last_15_minutes
 from rest_api.util.shape import ShapeManager
 from processors.geometry.point import Point
 from typing import List
 from rest_api.models import Segment
 from shapely.geometry import LineString as shp_LineString
 from processors.geometry.line import PolylineSegment
-from gtfs_rt.models import GPSPulse
+import geopandas as gpd
+from geojson import Feature
+from geojson import Point as GeoPoint
 
 DISTANCE_THRESHOLD = 25  # meters
 
@@ -42,23 +48,38 @@ class GridManager(Dict[Tuple[int, int], GridCell]):
         self.grid = None
         self.bbox = None
 
-    def filter_gps(self, start_date, end_date):
-        grid_min_lon, grid_min_lat, grid_max_lon, grid_max_lat = self.get_bbox()
-        filter_query = {
-            "timestamp__gte": start_date,
-            "timestamp__lte": end_date,
-            "latitude__gte": grid_min_lat,
-            "latitude__lte": grid_max_lat,
-            "longitude__gte": grid_min_lon,
-            "longitude__lte": grid_max_lon
-        }
-        return GPSPulse.objects.filter(**filter_query).values(
-            "route_id", "direction_id",
-            "license_plate",
-            "latitude",
-            "longitude",
-            "timestamp",
-        ).distinct()
+    def get_gps_gdf(self, queryset):
+        features = []
+        for gps in queryset:
+            timestamp = gps.timestamp
+            timestamp = timezone.localtime(value=timestamp)
+            route_id = gps.route_id
+            direction_id = "I" if gps.direction_id == 0 else "R"
+            license_plate = gps.license_plate
+            feat = Feature(geometry=GeoPoint(coordinates=[gps.longitude, gps.latitude]),
+                           properties=dict(
+                               route_id=route_id,
+                               direction_id=direction_id,
+                               license_plate=license_plate,
+                               timestamp=timestamp
+                           ))
+            features.append(feat)
+        gdf = gpd.GeoDataFrame.from_features(features)
+        return gdf
+
+    def filter_gps(self):
+        queryset = get_gps_data_from_last_15_minutes()
+        gps_gdf = self.get_gps_gdf(queryset)
+        buffered_shape = self.shape_manager.get_buffered_shape()
+        filtered_gps = gps_gdf[gps_gdf.geometry.within(buffered_shape)]
+        return filtered_gps
+
+    def filter_gps_from_dates(self, start_date, end_date):
+        queryset = GPSPulse.objects.filter(timestamp__gte=start_date, timestamp__lte=end_date)
+        gps_gdf = self.get_gps_gdf(queryset)
+        buffered_shape = self.shape_manager.get_buffered_shape()
+        filtered_gps = gps_gdf[gps_gdf.geometry.within(buffered_shape)]
+        return filtered_gps
 
     def process(self):
         grid = self.__create_grid()

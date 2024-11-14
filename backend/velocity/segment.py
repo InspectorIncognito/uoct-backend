@@ -6,6 +6,7 @@ from collections import defaultdict
 from typing import List
 
 import pytz
+from django.utils.timezone import get_current_timezone
 
 from processors.geometry.point import Point
 from rest_api.util.shape import ShapeManager
@@ -120,7 +121,7 @@ class SegmentCriteria:
         raise NotImplementedError('You must create a subclass of')
 
     def get_temporal_segment(self, dt: datetime.datetime,
-                             timezone: datetime.tzinfo = pytz.timezone("America/Santiago")):
+                             timezone: datetime.tzinfo = get_current_timezone()):
         if dt.tzinfo is None:
             raise ValueError("datetime instance must have a tzinfo")
         converted_timestamp = dt.astimezone(timezone)
@@ -134,7 +135,7 @@ class SegmentCriteria:
         ts_obj = TemporalSegment(index, start_time, end_time)
         return ts_obj
 
-    def get_day_type(self, dt: datetime.datetime, timezone: datetime.tzinfo = pytz.UTC):
+    def get_day_type(self, dt: datetime.datetime, timezone: datetime.tzinfo = get_current_timezone()):
         if dt.tzinfo is None:
             raise ValueError("datetime instance must have a tzinfo")
         converted_timestamp = dt.astimezone(timezone)

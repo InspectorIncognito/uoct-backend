@@ -1,3 +1,5 @@
+import json
+
 from rest_api.models import Services, Segment, Shape
 from shapely.geometry import LineString as shp_LineString
 from rest_api.util.gtfs import GTFSShapeManager
@@ -23,10 +25,11 @@ def assign_routes_to_segments():
         gdf_routes = gpd.GeoDataFrame.from_features(gtfs_routes, crs='epsg:4326')
         for segment in segments:
             segment_linestring = shp_LineString(coordinates=segment.geometry)
-            buffered = segment_linestring.buffer(0.0001, cap_style='flat', join_style='bevel')
+            buffered = segment_linestring.buffer(0.0005, cap_style='flat', join_style='bevel')
             gdf_buffered = gpd.GeoDataFrame(index=[0], crs='epsg:4326', geometry=[buffered])
             clipped = gpd.clip(gdf_routes, gdf_buffered)
             services = clipped['shape_id'].tolist()
+            services.sort()
             create_services(segment, services)
         i += 1
 

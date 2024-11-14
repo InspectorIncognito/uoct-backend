@@ -1,3 +1,5 @@
+from typing import List
+
 import numpy as np
 from datetime import datetime, timedelta
 from django.utils import timezone
@@ -21,7 +23,17 @@ def speed_threshold(x):
 
 def get_temporal_segment(date: datetime, interval: int = 15):
     day_minutes = date.hour * 60 + date.minute
-    return int(day_minutes / interval)
+    return day_minutes // interval
+
+
+def get_temporal_range(temporal_segment):
+    start_time_minutes = temporal_segment * 15
+    hours = start_time_minutes // 60
+    minutes = start_time_minutes % 60
+
+    start_time = timezone.localtime().replace(hour=hours, minute=minutes, second=0, microsecond=0)
+    end_time = start_time + timedelta(minutes=15)
+    return start_time, end_time
 
 
 def get_previous_temporal_segment(date: datetime = timezone.localtime(), interval: int = 15):

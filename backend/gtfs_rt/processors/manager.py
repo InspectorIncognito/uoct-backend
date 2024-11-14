@@ -7,6 +7,8 @@ from gtfs_rt.models import GPSPulse
 from gtfs_rt.config import PROTO_URL
 from google.transit import gtfs_realtime_pb2
 
+from rest_api.models import GTFSRTTimestamp
+
 
 class GTFSRTManager:
     def __init__(self, gtfs_rt_url=PROTO_URL):
@@ -40,8 +42,19 @@ class GTFSRTManager:
         response = requests.get(self.url)
         return response.content
 
-    @staticmethod
-    def save_gtfs_rt_to_db(feed: gtfs_realtime_pb2.FeedMessage):
+    def save_gtfs_rt_to_db(self, feed: gtfs_realtime_pb2.FeedMessage):
+        current_timestamp = self.get_timestamp_from_feed(feed)
+        if current_timestamp:
+            current_timestamp = str(current_timestamp)
+            manager = GTFSRTTimestamp.objects.first()
+            last_timestamp = manager.last_timestamp
+            if current_timestamp <= last_timestamp:
+                print('Ignoring duplicated GTFS-RT')
+                return
+            else:
+                manager.last_timestamp = current_timestamp
+                manager.save()
+
         for entity in feed.entity:
             if entity.HasField('vehicle'):
                 if entity.vehicle.HasField('trip') and entity.vehicle.HasField('vehicle'):
