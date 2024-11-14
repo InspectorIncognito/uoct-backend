@@ -1,5 +1,5 @@
 from django.utils import timezone
-from datetime import datetime, timedelta
+from datetime import timedelta
 
 from gtfs_rt.models import GPSPulse
 from gtfs_rt.utils import get_temporal_segment, get_temporal_range
@@ -19,7 +19,4 @@ def get_gps_data_from_last_15_minutes():
         "longitude",
         "timestamp",
     ).distinct()
-    print("START TIME:", start_date)
-    print("END TIME:", end_date)
-    print("TOTAL GPS:", len(queryset))
     return queryset

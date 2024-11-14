@@ -54,7 +54,7 @@ class ShapeManager:
                 geometry = segment.geometry
                 features.append(Feature(geometry=LineString(coordinates=geometry)))
         gdf = gpd.GeoDataFrame.from_features(features)
-        gdf['geometry'] = gdf['geometry'].buffer(distance=0.0001, cap_style='flat')
+        gdf['geometry'] = gdf['geometry'].buffer(distance=0.0005, cap_style='flat')
         polygon_gdf = gdf.union_all()
         return polygon_gdf
 

@@ -5,6 +5,8 @@ from django.db import models
 from shapely.geometry import LineString as shp_LineString
 from geojson.geometry import LineString
 from geojson.feature import Feature
+
+from rest_api.util.temporal_segment import get_last_temporal_segment_data
 from velocity.constants import DEG_PI, DEG_PI_HALF
 from processors.geometry.point import Point
 from django.utils import timezone
@@ -89,19 +91,14 @@ class Segment(models.Model):
             previous_point = current_point
         return accum_distance
 
-    def to_geojson(self, use_temporal_segment=True):
-        properties = {
-            "shape_id": self.shape.pk,
-            "sequence": self.sequence,
-        }
-        now = timezone.localtime()
-        temporal_segment = get_temporal_segment(now) - 1
-        day_type = get_day_type(now)
-        speed_query = Speed.objects.filter(segment=self)
-        if use_temporal_segment:
-            speed = speed_query.filter(segment=self, temporal_segment=temporal_segment).first()
-        else:
-            speed: Speed = speed_query.order_by('-timestamp').first()
+    def to_geojson(self):
+        properties = dict(
+            shape_id=self.shape.pk,
+            sequence=self.sequence,
+        )
+        date, day_type, temporal_segment = get_last_temporal_segment_data()
+        speed = Speed.objects.filter(segment=self, timestamp__date=date, temporal_segment=temporal_segment).first()
+
         if speed is not None:
             alert = Alert.objects.filter(segment=self, temporal_segment=speed.temporal_segment).first()
             if alert is not None:
@@ -159,7 +156,7 @@ class Speed(models.Model):
 
     def get_speed(self):
         try:
-            return round(self.distance / self.time_secs * 3.6, 2)
+            return round(3.6 * self.distance / self.time_secs, 2)
         except ZeroDivisionError:
             return 0.0
 

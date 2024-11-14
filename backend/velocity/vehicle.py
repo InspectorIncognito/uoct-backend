@@ -1,10 +1,8 @@
 from velocity.grid import GridManager
 from velocity.gps import GPSPulse as GPS
-from gtfs_rt.models import GPSPulse
 from velocity.expedition import ExpeditionData
 from rest_api.util.services import get_all_services, get_shape_by_route_id
 from velocity.segment import SegmentCriteria
-from gtfs_rt.config import TIMEZONE
 
 
 class VehicleData:
@@ -38,20 +36,26 @@ class VehicleManager:
 
         self.gps_ignored = 0
 
-    def add_data(self, gps_pulse: dict):
-        license_plate = gps_pulse["license_plate"]
+    def add_data(self, gps_data):
+        timestamp = gps_data.timestamp
+        gps_pulse = gps_data.geometry
+        license_plate = gps_data.license_plate
+        route = gps_data.route_id
+        direction = gps_data.direction_id
+        longitude = gps_pulse.x
+        latitude = gps_pulse.y
         vehicle_data = VehicleData(self.grid_manager, license_plate=license_plate)
         if vehicle_data not in self.vehicles:
             self.vehicles[vehicle_data] = vehicle_data
 
         try:
-            route_id = str(gps_pulse["route_id"]) + ("I" if gps_pulse["direction_id"] == 0 else "R")
+            route_id = f"{route}{direction}"
             shape_id = get_shape_by_route_id(self.services, route_id)
             if shape_id is None:
                 self.gps_ignored += 1
                 raise ValueError(f"Skipping GPS pulse for route {route_id}.")
-            gps_obj = GPS(latitude=gps_pulse["latitude"], longitude=gps_pulse["longitude"],
-                          timestamp=gps_pulse["timestamp"].astimezone(TIMEZONE))
+            gps_obj = GPS(latitude=latitude, longitude=longitude,
+                          timestamp=timestamp)
             self.vehicles[vehicle_data].add_gps_pulse(gps_obj, shape_id, route_id, license_plate)
         except ValueError as e:
             pass

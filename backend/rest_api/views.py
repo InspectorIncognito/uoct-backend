@@ -26,11 +26,16 @@ class TestView(generics.GenericAPIView):
 
     def get(self, request, *args, **kwargs):
         gm = GridManager()
-        #gps_points = gm.filter_gps()
-        last_gps = gm.get_gps_gdf(get_gps_data_from_last_15_minutes())
-        response_json = json.loads(last_gps.to_json())
+        filtered_gps = gm.filter_gps()
+        response = dict(count=len(filtered_gps), data=json.loads(filtered_gps.to_json()))
 
-        return JsonResponse(data=response_json, safe=False)
+        #gm = GTFSManager()
+        #shapes_reader = gm.shapes_reader
+        #df = shapes_reader.load_csv_file_as_df()
+        #processed_df = shapes_reader.process_df(df)
+        #response = json.loads(processed_df.to_json())
+
+        return JsonResponse(data=response, safe=False)
 
 
 class GeoJSONViewSet(generics.GenericAPIView):

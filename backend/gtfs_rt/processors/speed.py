@@ -2,32 +2,32 @@ import time
 import datetime
 import pandas as pd
 from django.utils import timezone
-from rest_api.models import Segment, Speed, Shape
+from rest_api.models import Segment, Speed
+from rest_api.util.temporal_segment import get_last_temporal_segment_dates
+from velocity.grid import GridManager
 from velocity.vehicle import VehicleManager
 from velocity.segment import FiveHundredMeterSegmentCriteria
 from velocity.utils import generate_grid
-from gtfs_rt.utils import get_temporal_segment
 
 
 def calculate_speed(start_date: datetime.datetime = None, end_date: datetime.datetime = None):
     print("Calling calculate_speed command...")
     if start_date is None or end_date is None:
-        delta = datetime.timedelta(minutes=15)
-        end_date = timezone.localtime().replace(second=0, microsecond=0)
-        start_date = end_date - delta
-
+        start_date, end_date = get_last_temporal_segment_dates()
+    print("Start date:", start_date)
+    print("End date:", end_date)
     today_weekday = start_date.weekday()
     today_weekday = "L" if today_weekday < 5 else "S" if today_weekday == 5 else "D"
 
-    grid_obj = generate_grid()
+    grid_obj: GridManager = generate_grid()
 
     vm = VehicleManager(grid_obj)
 
-    queryset = grid_obj.filter_gps(start_date, end_date)
-    print(f"Retrieved {len(queryset)} GPS Pulses.")
+    gps_df: pd.DataFrame = grid_obj.filter_gps_from_dates(start_date, end_date)
+    print(f"Retrieved {len(gps_df)} GPS Pulses.")
 
     start_time = time.time()
-    for (i, gps) in enumerate(queryset):
+    for _, gps in gps_df.iterrows():
         vm.add_data(gps)
     end_time = time.time()
     print(f"GPS processed in {int(end_time - start_time)} seconds.")
@@ -36,14 +36,13 @@ def calculate_speed(start_date: datetime.datetime = None, end_date: datetime.dat
     speed_records = vm.calculate_speed(segment_criteria)
     df = pd.DataFrame.from_records(speed_records)[
         ['shape_id', 'spatial_segment_index', 'local_temporal_segment_index', 'distance_mts', 'time_secs']]
-
     df = df.groupby(['shape_id', 'spatial_segment_index', 'local_temporal_segment_index']).agg({
         'distance_mts': 'sum',
         'time_secs': 'sum'
     }).reset_index()
     df = df.round({'distance_mts': 2, 'time_secs': 2})
 
-    df['speed(km/h)'] = round(df['distance_mts'] / df['time_secs'] * 3.6, 2)
+    df['speed(km/h)'] = round(3.6 * df['distance_mts'] / df['time_secs'], 2)
 
     # Removing outliers
     # TODO: Remove outliers using historical data (with medians)
@@ -69,7 +68,7 @@ def calculate_speed(start_date: datetime.datetime = None, end_date: datetime.dat
                 day_type=today_weekday,
                 distance=distance,
                 time_secs=time_secs,
-                timestamp=timezone.localtime()
+                timestamp=start_date
             )
             Speed.objects.create(**speed_data)
     print("Speed records up to date.")
