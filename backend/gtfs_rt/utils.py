@@ -36,6 +36,13 @@ def get_temporal_range(temporal_segment):
     return start_time, end_time
 
 
+def get_previous_temporal_segment(date: datetime = timezone.localtime(), interval: int = 15):
+    previous_datetime = date - timedelta(minutes=interval)
+    previous_date = previous_datetime.date()
+    previous_temporal_segment = get_temporal_segment(previous_datetime)
+    return previous_date, previous_temporal_segment
+
+
 def get_day_type(dt: datetime):
     if dt.tzinfo is None:
         raise ValueError("datetime instance must have a tzinfo")
@@ -44,6 +51,13 @@ def get_day_type(dt: datetime):
     day_type = 'L' if weekday < 5 else 'S' if weekday == 5 else 'D'
 
     return day_type
+
+
+def get_previous_month():
+    current_datetime = timezone.localtime()
+    current_date = current_datetime.replace(day=1)
+    current_date = current_date - timedelta(days=1)
+    return current_date.month
 
 
 def flush_gps_pulses():
