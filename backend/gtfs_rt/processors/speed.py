@@ -1,9 +1,8 @@
 import time
 import datetime
 import pandas as pd
-from django.utils import timezone
+from gtfs_rt.utils import get_last_temporal_range
 from rest_api.models import Segment, Speed
-from rest_api.util.temporal_segment import get_last_temporal_segment_dates
 from velocity.grid import GridManager
 from velocity.vehicle import VehicleManager
 from velocity.segment import FiveHundredMeterSegmentCriteria
@@ -13,9 +12,7 @@ from velocity.utils import generate_grid
 def calculate_speed(start_date: datetime.datetime = None, end_date: datetime.datetime = None):
     print("Calling calculate_speed command...")
     if start_date is None or end_date is None:
-        start_date, end_date = get_last_temporal_segment_dates()
-    print("Start date:", start_date)
-    print("End date:", end_date)
+        start_date, end_date = get_last_temporal_range()
     today_weekday = start_date.weekday()
     today_weekday = "L" if today_weekday < 5 else "S" if today_weekday == 5 else "D"
 

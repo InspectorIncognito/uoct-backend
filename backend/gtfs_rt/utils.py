@@ -1,5 +1,3 @@
-from typing import List
-
 import numpy as np
 from datetime import datetime, timedelta
 from django.utils import timezone
@@ -36,11 +34,12 @@ def get_temporal_range(temporal_segment):
     return start_time, end_time
 
 
-def get_previous_temporal_segment(date: datetime = timezone.localtime(), interval: int = 15):
-    previous_datetime = date - timedelta(minutes=interval)
-    previous_date = previous_datetime.date()
-    previous_temporal_segment = get_temporal_segment(previous_datetime)
-    return previous_date, previous_temporal_segment
+def get_last_temporal_range():
+    delta = timedelta(minutes=15)
+    now = timezone.localtime()
+    last_15_minutes = now - delta
+    last_temporal_segment = get_temporal_segment(last_15_minutes)
+    return get_temporal_range(last_temporal_segment)
 
 
 def get_day_type(dt: datetime):
