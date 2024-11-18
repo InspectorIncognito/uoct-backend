@@ -99,25 +99,25 @@ class Segment(models.Model):
         date, day_type, temporal_segment = get_last_temporal_segment_data()
         speed = Speed.objects.filter(segment=self, timestamp__date=date, temporal_segment=temporal_segment).first()
 
-        if speed is not None:
+        if speed:
             alert = Alert.objects.filter(segment=self, temporal_segment=speed.temporal_segment).first()
-            if alert is not None:
+            if alert:
                 properties['alert_id'] = alert.pk
-            speed_info = speed.check_value()
-            properties.update(speed_info)
+            properties.update(speed.check_value())
         else:
-            historic_speed = (HistoricSpeed.objects.filter(segment=self, day_type=day_type,
-                                                           temporal_segment=temporal_segment)
-                              .order_by("-timestamp").first())
-            if historic_speed is not None:
-                properties["historic_speed"] = historic_speed.speed
-            else:
-                properties["historic_speed"] = "Sin registro"
             properties["speed"] = "Sin registro"
             properties["color"] = "#DDDDDD"
 
+        historic_speed = (HistoricSpeed.objects.filter(segment=self, day_type=day_type,
+                                                       temporal_segment=temporal_segment)
+                          .order_by('-timestamp').first())
+        if historic_speed:
+            properties['historic_speed'] = historic_speed.speed
+        else:
+            properties['historic_speed'] = 'Sin registro'
+
         services = Services.objects.filter(segment=self).first()
-        if services is not None:
+        if services:
             properties["services"] = services.services
         line = shp_LineString(coordinates=self.geometry)
         line = line.simplify(tolerance=0.00001)
