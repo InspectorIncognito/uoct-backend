@@ -1,13 +1,15 @@
 from datetime import datetime
 import json
+
+from django.db.models import F, ExpressionWrapper, FloatField
+from django.db.models.functions import Round
 from django.utils import timezone
 from rest_framework import viewsets, mixins
 from django.http import JsonResponse, StreamingHttpResponse
 from rest_framework import generics
 from rest_framework.permissions import AllowAny
 
-from gtfs_rt.processors.manager import GTFSRTManager
-from gtfs_rt.services import get_gps_data_from_last_15_minutes
+from gtfs_rt.utils import get_previous_month, get_last_temporal_segment
 from processors.models.shapes import shapes_to_geojson
 from rest_api.models import Shape, Segment, GTFSShape, Services, Speed, HistoricSpeed, Stop, AlertThreshold, Alert
 from rest_api.serializers import ShapeSerializer, SegmentSerializer, GTFSShapeSerializer, ServicesSerializer, \
@@ -148,7 +150,7 @@ class SpeedViewSet(GenericSpeedViewSet):
             'timestamp'
         )
         if len(query_params) == 0:
-            previous_date, previous_temporal_segment = get_previous_temporal_segment()
+            previous_date, previous_temporal_segment = get_last_temporal_segment()
             queryset = queryset.filter(timestamp__date=previous_date, temporal_segment=previous_temporal_segment)
         fieldnames_dict = dict(
             segment__shape='shape',
@@ -214,7 +216,7 @@ class AlertViewSet(viewsets.ModelViewSet):
             'date'
         )
         if len(self.request.query_params) == 0:
-            previous_date, previous_temporal_segment = get_previous_temporal_segment()
+            previous_date, previous_temporal_segment = get_last_temporal_segment()
             queryset = queryset.filter(timestamp__date=previous_date, temporal_segment=previous_temporal_segment)
         response = dict(
             count=queryset.count(),

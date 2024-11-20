@@ -42,6 +42,14 @@ def get_last_temporal_range():
     return get_temporal_range(last_temporal_segment)
 
 
+def get_last_temporal_segment():
+    delta = timedelta(minutes=15)
+    now = timezone.localtime()
+    last_15_minutes = now - delta
+    last_temporal_segment = get_temporal_segment(last_15_minutes)
+    return last_15_minutes.date(), last_temporal_segment
+
+
 def get_day_type(dt: datetime):
     if dt.tzinfo is None:
         raise ValueError("datetime instance must have a tzinfo")
