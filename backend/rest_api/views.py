@@ -220,9 +220,9 @@ class AlertViewSet(viewsets.ModelViewSet):
             queryset = queryset.filter(timestamp__date=previous_date, temporal_segment=previous_temporal_segment)
         response = dict(
             count=queryset.count(),
-            results=queryset
+            results=list(queryset)
         )
-        return Response(response)
+        return JsonResponse(response, safe=False)
 
 
 class StopViewSet(viewsets.ModelViewSet):
