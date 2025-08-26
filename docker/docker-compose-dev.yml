@@ -22,12 +22,23 @@ services:
     profiles: [ 'dev' ]
     ports:
       - "8080:80"
+    depends_on:
+      - web
+    networks:
+      - nginx_network
   web:
     profiles: [ 'dev', 'test' ]
     <<: *dev-server
     command: webserver-dev
     ports:
       - "8081:8000"
+    depends_on:
+      - db
+      - cache
+    networks:
+      - nginx_network
+      - database_network
+      - cache_network
   db:
     profiles: [ 'dev', 'test' ]
     ports:
