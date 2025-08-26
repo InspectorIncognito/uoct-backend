@@ -1,16 +1,22 @@
-import geopandas as gpd
+import json
 from typing import List
+
+import geopandas as gpd
+from config.paths import FIXTURE_PATH
 from geojson.feature import Feature, FeatureCollection
+from haversine import Unit, haversine
 from processors.geometry.point import Point as p
+from processors.geometry.utils import (
+    interpolate_points_by_distance,
+    linestring_distance,
+)
+from processors.osm.query import ALAMEDA_QUERY, overpass_query
+from rest_api.models import Segment, Shape
+from rest_api.util.shape import flush_shape_objects
+from shapely.geometry import LineString as shp_LineString
 from shapely.geometry import Point
 from shapely.ops import linemerge, split
-from shapely.geometry import LineString as shp_LineString
-from rest_api.util.shape import flush_shape_objects
-from rest_api.models import Shape, Segment
-from processors.osm.query import overpass_query, ALAMEDA_QUERY
-from haversine import haversine, Unit
-from processors.geometry.utils import interpolate_points_by_distance, linestring_distance
-from config.paths import FIXTURE_PATH
+
 
 # Separa el geojson en N linestring, con N el número de calles aisladas (alameda ida, alameda vuelta == 2)
 def split_geojson_by_shape(df: gpd.GeoDataFrame) -> List[gpd.GeoDataFrame]:
@@ -36,22 +42,66 @@ def split_geojson_by_shape(df: gpd.GeoDataFrame) -> List[gpd.GeoDataFrame]:
                     dir_len += 1
                 else:
                     new_aux_df.append(feature)
-            features = FeatureCollection(features=[Feature(geometry=f.geometry) for f in new_aux_df])
+            features = FeatureCollection(
+                features=[Feature(geometry=f.geometry) for f in new_aux_df]
+            )
             current_df = gpd.GeoDataFrame.from_features(features)
             i += 1
-        output.append(gpd.GeoDataFrame.from_features(
-            FeatureCollection(features=[Feature(geometry=f.geometry) for f in current_direction])))
+        output.append(
+            gpd.GeoDataFrame.from_features(
+                FeatureCollection(
+                    features=[Feature(geometry=f.geometry) for f in current_direction]
+                )
+            )
+        )
         aux_df = current_df.copy()
     return output
 
 
 def merge_shape(gdf: gpd.GeoDataFrame) -> shp_LineString:
+    """Merge the geometries of a GeoDataFrame into a single LineString.
+
+    Parameters
+    ----------
+    gdf : gpd.GeoDataFrame
+        The GeoDataFrame containing the geometries to merge.
+
+    Returns
+    -------
+    shp_LineString
+        The merged LineString geometry.
+    """
     merged = linemerge(gdf["geometry"].unary_union)
     return merged
 
 
-def segment_shape_by_distance(shape: shp_LineString, distance_threshold: float = 500,
-                              distance_algorithm: str = 'euclidean'):
+def iterate_coords(geom):
+    """Iterate over the coordinates of a geometry. If the geometry is a MultiGeometry, it will iterate over all sub-geometries.
+
+    Parameters
+    ----------
+    geom : shapely.geometry.base.BaseGeometry
+        The geometry to iterate over.
+
+    Yields
+    ------
+    tuple
+        A tuple representing the (longitude, latitude) coordinates of each point in the geometry.
+    """
+    if geom.geom_type.startswith("Multi"):
+        for g in geom.geoms:
+            for c in g.coords:
+                yield c
+    else:
+        for c in geom.coords:
+            yield c
+
+
+def segment_shape_by_distance(
+    shape: shp_LineString,
+    distance_threshold: float = 500,
+    distance_algorithm: str = "euclidean",
+):
     if distance_threshold <= 0:
         raise ValueError("distance_threshold must be greater than 0.")
     output_linestrings = []
@@ -60,7 +110,7 @@ def segment_shape_by_distance(shape: shp_LineString, distance_threshold: float =
     previous_point = None
     segment = []
     distance_accum = 0
-    for point in geom.coords:
+    for point in iterate_coords(geom):
         lon, lat = point
         current_point = Point(lon, lat)
         if previous_point is None:
@@ -69,19 +119,22 @@ def segment_shape_by_distance(shape: shp_LineString, distance_threshold: float =
             continue
         previous_point_aux = p(latitude=previous_point.y, longitude=previous_point.x)
         current_point_aux = p(latitude=current_point.y, longitude=current_point.x)
-        distance = previous_point_aux.distance(current_point_aux, algorithm=distance_algorithm)
+        distance = previous_point_aux.distance(
+            current_point_aux, algorithm=distance_algorithm
+        )
         if distance_accum + distance >= distance_threshold:
             left = distance_threshold - distance_accum
             if left > 1:
-                interpolated_point_coords = interpolate_points_by_distance(previous_point, current_point,
-                                                                           distance_in_meters=left)
+                interpolated_point_coords = interpolate_points_by_distance(
+                    previous_point, current_point, distance_in_meters=left
+                )
                 current_point = Point(interpolated_point_coords)
             segment.append(current_point)
             line = shp_LineString(segment)
             output_linestrings.append(line)
             previous_point = current_point
             segment = [current_point]
-            if point == geom.coords[-1]:
+            if point == geom.geoms[-1].coords[-1]:
                 segment = []
             distance_accum = 0
         else:
@@ -110,22 +163,49 @@ def save_all_segmented_shapes_to_db(segmented_shapes: List[List[shp_LineString]]
 def process_shape_data(distance_threshold: float = 500.0):
     print("Downloading OSM Overpass data...")
     query_data = gpd.GeoDataFrame.from_features(overpass_query(ALAMEDA_QUERY))
+    print("Query data information:")
+    print(query_data.info())
+    print("Query data sample:")
+    print(query_data.head())
     print("splitting by shape..")
     splitted_geojson = split_geojson_by_shape(query_data)
     segmented_shapes = []
     print(f"Got {len(splitted_geojson)} different shapes")
     for idx, feature in enumerate(splitted_geojson):
         merged = merge_shape(feature)
-        segmented = segment_shape_by_distance(merged, distance_threshold, distance_algorithm='haversine')
+        segmented = segment_shape_by_distance(
+            merged, distance_threshold, distance_algorithm="haversine"
+        )
         segmented_shapes.append(segmented)
     save_all_segmented_shapes_to_db(segmented_shapes)
 
 
+from pyproj import CRS
+
+
 def process_fixture_data(distance_threshold: float = 500.0):
-    gdf = gpd.read_file(FIXTURE_PATH)
+    try:
+        gdf = gpd.read_file(FIXTURE_PATH)
+        if gdf.crs is None:
+            gdf.set_crs(CRS.from_string("EPSG:4324"), inplace=True)
+    except Exception:
+        with open(FIXTURE_PATH, "r") as f:
+            data = json.load(f)
+        features_with_geometry = [
+            feature
+            for feature in data["features"]
+            if feature.get("geometry") is not None
+        ]
+
+        gdf = gpd.GeoDataFrame.from_features(features_with_geometry)
+        if gdf.geometry.name not in gdf.columns:
+            gdf.set_geometry("geometry", inplace=True)
+        gdf.set_crs(CRS.from_string("EPSG:4326"), inplace=True)
     segmented_shapes = []
     for idx, feature in gdf.iterrows():
         merged = feature.geometry
-        segmented = segment_shape_by_distance(merged, distance_threshold, distance_algorithm='haversine')
+        segmented = segment_shape_by_distance(
+            merged, distance_threshold, distance_algorithm="haversine"
+        )
         segmented_shapes.append(segmented)
     save_all_segmented_shapes_to_db(segmented_shapes)
