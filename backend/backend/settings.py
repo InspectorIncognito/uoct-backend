@@ -61,6 +61,7 @@ MIDDLEWARE = [
     'django.middleware.security.SecurityMiddleware',
     'django.contrib.sessions.middleware.SessionMiddleware',
     'django.middleware.common.CommonMiddleware',
+    'backend.middleware.CSRFExemptAPIMiddleware',
     'django.middleware.csrf.CsrfViewMiddleware',
     'django.contrib.auth.middleware.AuthenticationMiddleware',
     'django.contrib.messages.middleware.MessageMiddleware',
@@ -156,6 +157,7 @@ AUTH_USER_MODEL = "user.User"
 if DEBUG:
     # CORS Origins parameters
     CORS_ALLOWED_ORIGINS = config("CORS_ALLOWED_ORIGINS", cast=Csv())
+    CORS_ALLOW_CREDENTIALS = True
     CORS_ALLOW_HEADERS = (
         "content-disposition",
         "accept-encoding",
@@ -163,7 +165,21 @@ if DEBUG:
         "accept",
         "origin",
         "authorization",
+        "x-csrftoken",
+        "x-requested-with",
     )
+    
+    # CSRF Settings for development
+    CSRF_TRUSTED_ORIGINS = [
+        "http://localhost:8080",
+        "http://127.0.0.1:8080",
+        "http://localhost",
+        "http://127.0.0.1",
+    ]
+    CSRF_COOKIE_HTTPONLY = False
+    CSRF_COOKIE_SAMESITE = 'Lax'
+    # Exempt API endpoints from CSRF (since they use Token Authentication)
+    CSRF_EXEMPT_URLS = [r'^api/.*$']
 
 # REST parameters
 REST_FRAMEWORK = {
