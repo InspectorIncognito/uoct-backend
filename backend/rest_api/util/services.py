@@ -23,7 +23,6 @@ def assign_routes_to_segments():
         gtfs_shape_manager.filter_by_direction(i)
         gtfs_routes = gtfs_shape_manager.to_geojson()
         gdf_routes = gpd.GeoDataFrame.from_features(gtfs_routes)
-        print(gdf_routes.head())
         for segment in segments:
             segment_linestring = shp_LineString(coordinates=segment.geometry)
             buffered = segment_linestring.buffer(
