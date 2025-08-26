@@ -1,3 +1,8 @@
+#!/bin/bash
+
+# Define default values
+TRY_LOOP=${TRY_LOOP:-20}
+
 wait_for_port() {
   local name="$1" host="$2" port="$3"
   local j=0
@@ -47,4 +52,4 @@ test)
   echo "Running tests"
   python /app/backend/manage.py test backend
   ;;
-esac
+esac 
