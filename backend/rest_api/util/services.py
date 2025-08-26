@@ -1,9 +1,9 @@
 import json
 
-from rest_api.models import Services, Segment, Shape
-from shapely.geometry import LineString as shp_LineString
-from rest_api.util.gtfs import GTFSShapeManager
 import geopandas as gpd
+from rest_api.models import Segment, Services, Shape
+from rest_api.util.gtfs import GTFSShapeManager
+from shapely.geometry import LineString as shp_LineString
 
 
 def flush_services_from_db():
@@ -22,13 +22,18 @@ def assign_routes_to_segments():
         segments = shape.get_segments()
         gtfs_shape_manager.filter_by_direction(i)
         gtfs_routes = gtfs_shape_manager.to_geojson()
-        gdf_routes = gpd.GeoDataFrame.from_features(gtfs_routes, crs='epsg:4326')
+        gdf_routes = gpd.GeoDataFrame.from_features(gtfs_routes)
+        print(gdf_routes.head())
         for segment in segments:
             segment_linestring = shp_LineString(coordinates=segment.geometry)
-            buffered = segment_linestring.buffer(0.0005, cap_style='flat', join_style='bevel')
-            gdf_buffered = gpd.GeoDataFrame(index=[0], crs='epsg:4326', geometry=[buffered])
+            buffered = segment_linestring.buffer(
+                0.0005, cap_style="flat", join_style="bevel"
+            )
+            gdf_buffered = gpd.GeoDataFrame(
+                index=[0], crs="epsg:4326", geometry=[buffered]
+            )
             clipped = gpd.clip(gdf_routes, gdf_buffered)
-            services = clipped['shape_id'].tolist()
+            services = clipped["shape_id"].tolist()
             services.sort()
             create_services(segment, services)
         i += 1
