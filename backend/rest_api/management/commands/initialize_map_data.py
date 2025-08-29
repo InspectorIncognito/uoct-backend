@@ -1,5 +1,4 @@
 from django.core.management import BaseCommand, call_command
-from pyproj import CRS
 
 
 class Command(BaseCommand):
@@ -13,6 +12,7 @@ class Command(BaseCommand):
 
         # Create Shapes and Segments
         if not options["use_fixture"]:
+            # Problema con la función split_geojson_by_shape en osm/process.py. No esta captando bien las direcciones.
             call_command("process_shape_data")
         else:
             call_command("process_fixture_data")
