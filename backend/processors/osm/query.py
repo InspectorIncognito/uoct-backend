@@ -5,12 +5,12 @@ ALAMEDA_QUERY = """
     rel(1674530);
     map_to_area->.santiago;
     (
-      way(area.santiago)[highway="primary"][name="Avenida Providencia"];
-      way(area.santiago)[highway="primary"][name="Avenida Nueva Providencia"];
-      way(176118014);
-      way(area.santiago)[highway="primary"][name="Avenida Libertador Bernardo O'Higgins"];
-      way(area.santiago)[highway="primary"][name="Avenida Apoquindo"];
+      way(area.santiago)[highway~"primary|secondary"][name="Avenida Libertador Bernardo O'Higgins"];
+      way(area.santiago)[highway~"primary|secondary"][name="Avenida Providencia"];
+      way(area.santiago)[highway~"primary|secondary"][name="Avenida Nueva Providencia"];
+      way(area.santiago)[highway~"primary|secondary"][name="Avenida Apoquindo"];
     );
+    out geom meta;
 """
 
 
@@ -28,6 +28,6 @@ def overpass_query(query):
     dict
         The GeoJSON response from the Overpass API.
     """
-    api = overpass.API()
+    api = overpass.API(timeout=180)
     response = api.get(query, verbosity="geom")
     return geojson.loads(geojson.dumps(response))
