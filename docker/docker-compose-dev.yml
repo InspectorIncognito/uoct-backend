@@ -1,5 +1,4 @@
-x-dev-server:
-  &dev-server
+x-dev-server: &dev-server
   build:
     context: ..
     dockerfile: docker/Dockerfile
@@ -19,7 +18,7 @@ services:
         - VUE_APP_BASE_URL=${VUE_APP_BASE_URL}
         - VITE_MAPBOX_TOKEN=${VITE_MAPBOX_TOKEN}
         - VITE_FORM_URL=${VITE_FORM_URL}
-    profiles: [ 'dev' ]
+    profiles: ["dev"]
     ports:
       - "8080:80"
     depends_on:
@@ -27,7 +26,7 @@ services:
     networks:
       - nginx_network
   web:
-    profiles: [ 'dev', 'test' ]
+    profiles: ["dev", "test"]
     <<: *dev-server
     command: webserver-dev
     ports:
@@ -40,6 +39,6 @@ services:
       - database_network
       - cache_network
   db:
-    profiles: [ 'dev', 'test' ]
+    profiles: ["dev", "test"]
     ports:
       - "5431:5432"

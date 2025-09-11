@@ -1,4 +1,4 @@
-FROM python:3.9.13-alpine3.16 as base
+FROM python:3.12-alpine3.20 as base
 
 FROM base as dependencies
 
