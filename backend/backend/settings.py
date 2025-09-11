@@ -9,11 +9,12 @@ https://docs.djangoproject.com/en/4.1/topics/settings/
 For the full list of settings and their values, see
 https://docs.djangoproject.com/en/4.1/ref/settings/
 """
+
 import os
 from pathlib import Path
 
 # Build paths inside the project like this: BASE_DIR / 'subdir'.
-from decouple import config, Csv
+from decouple import Csv, config
 
 BASE_DIR = Path(__file__).resolve().parent.parent
 
@@ -21,75 +22,70 @@ BASE_DIR = Path(__file__).resolve().parent.parent
 # See https://docs.djangoproject.com/en/4.1/howto/deployment/checklist/
 
 # SECURITY WARNING: keep the secret key used in production secret!
-SECRET_KEY = 'django-insecure-is-*5xr+@&cxd)ca&h0@3)kg*g7z1d7+saq06d@bxrl!to=i!&'
+SECRET_KEY = "django-insecure-is-*5xr+@&cxd)ca&h0@3)kg*g7z1d7+saq06d@bxrl!to=i!&"
 
 # SECURITY WARNING: don't run with debug turned on in production!
-DEBUG = config('DEBUG', cast=bool)
+DEBUG = config("DEBUG", cast=bool)
 
-ALLOWED_HOSTS = config('ALLOWED_HOSTS', cast=Csv())
+ALLOWED_HOSTS = config("ALLOWED_HOSTS", cast=Csv())
 
 # Application definition
 DJANGO_APPS = [
-    'django.contrib.admin',
-    'django.contrib.auth',
-    'django.contrib.contenttypes',
-    'django.contrib.sessions',
-    'django.contrib.messages',
-    'django.contrib.staticfiles',
+    "django.contrib.admin",
+    "django.contrib.auth",
+    "django.contrib.contenttypes",
+    "django.contrib.sessions",
+    "django.contrib.messages",
+    "django.contrib.staticfiles",
 ]
 
 THIRD_PARTY_APPS = [
-    'rest_framework',
-    'rest_framework.authtoken',
-    'django_rq',
-    'drf_spectacular',
+    "rest_framework",
+    "rest_framework.authtoken",
+    "django_rq",
+    "drf_spectacular",
 ]
 
 if DEBUG:
-    THIRD_PARTY_APPS.append('corsheaders')
+    THIRD_PARTY_APPS.append("corsheaders")
 
-LOCAL_APPS = [
-    'user',
-    'rest_api',
-    'gps',
-    'gtfs_rt'
-]
+LOCAL_APPS = ["user", "rest_api", "gps", "gtfs_rt"]
 
 INSTALLED_APPS = DJANGO_APPS + THIRD_PARTY_APPS + LOCAL_APPS
 
 MIDDLEWARE = [
-    'django.middleware.security.SecurityMiddleware',
-    'django.contrib.sessions.middleware.SessionMiddleware',
-    'django.middleware.common.CommonMiddleware',
-    'backend.middleware.CSRFExemptAPIMiddleware',
-    'django.middleware.csrf.CsrfViewMiddleware',
-    'django.contrib.auth.middleware.AuthenticationMiddleware',
-    'django.contrib.messages.middleware.MessageMiddleware',
-    'django.middleware.clickjacking.XFrameOptionsMiddleware',
+    "django.middleware.security.SecurityMiddleware",
+    "django.contrib.sessions.middleware.SessionMiddleware",
+    "django.middleware.common.CommonMiddleware",
+    "backend.middleware.CSRFExemptAPIMiddleware",
+    "django.middleware.csrf.CsrfViewMiddleware",
+    "django.contrib.auth.middleware.AuthenticationMiddleware",
+    "django.contrib.messages.middleware.MessageMiddleware",
+    "django.middleware.clickjacking.XFrameOptionsMiddleware",
 ]
 
 if DEBUG:
-    MIDDLEWARE.insert(2, 'corsheaders.middleware.CorsMiddleware')
+    MIDDLEWARE.insert(2, "corsheaders.middleware.CorsMiddleware")
 
-ROOT_URLCONF = 'backend.urls'
+ROOT_URLCONF = "backend.urls"
 
 TEMPLATES = [
     {
-        'BACKEND': 'django.template.backends.django.DjangoTemplates',
-        'DIRS': [],
-        'APP_DIRS': True,
-        'OPTIONS': {
-            'context_processors': [
-                'django.template.context_processors.debug',
-                'django.template.context_processors.request',
-                'django.contrib.auth.context_processors.auth',
-                'django.contrib.messages.context_processors.messages',
+        "BACKEND": "django.template.backends.django.DjangoTemplates",
+        "DIRS": [],
+        "APP_DIRS": True,
+        "OPTIONS": {
+            "context_processors": [
+                "django.template.context_processors.debug",
+                "django.template.context_processors.request",
+                "django.contrib.auth.context_processors.auth",
+                "django.contrib.messages.context_processors.messages",
             ],
         },
     },
 ]
 
-WSGI_APPLICATION = 'backend.wsgi.application'
+WSGI_APPLICATION = "backend.wsgi.application"
 
 # Database
 # https://docs.djangoproject.com/en/4.1/ref/settings/#databases
@@ -106,9 +102,11 @@ DATABASES = {
 }
 
 CACHES = {
-    'default': {
+    "default": {
         "BACKEND": "django.core.cache.backends.redis.RedisCache",
-        "LOCATION": "redis://{0}:{1}".format(config('REDIS_HOST'), config('REDIS_PORT'))
+        "LOCATION": "redis://{0}:{1}".format(
+            config("REDIS_HOST"), config("REDIS_PORT")
+        ),
     }
 }
 
@@ -117,25 +115,25 @@ CACHES = {
 
 AUTH_PASSWORD_VALIDATORS = [
     {
-        'NAME': 'django.contrib.auth.password_validation.UserAttributeSimilarityValidator',
+        "NAME": "django.contrib.auth.password_validation.UserAttributeSimilarityValidator",
     },
     {
-        'NAME': 'django.contrib.auth.password_validation.MinimumLengthValidator',
+        "NAME": "django.contrib.auth.password_validation.MinimumLengthValidator",
     },
     {
-        'NAME': 'django.contrib.auth.password_validation.CommonPasswordValidator',
+        "NAME": "django.contrib.auth.password_validation.CommonPasswordValidator",
     },
     {
-        'NAME': 'django.contrib.auth.password_validation.NumericPasswordValidator',
+        "NAME": "django.contrib.auth.password_validation.NumericPasswordValidator",
     },
 ]
 
 # Internationalization
 # https://docs.djangoproject.com/en/4.1/topics/i18n/
 
-LANGUAGE_CODE = 'en-us'
+LANGUAGE_CODE = "en-us"
 
-TIME_ZONE = 'America/Santiago'
+TIME_ZONE = "America/Santiago"
 
 USE_I18N = True
 
@@ -146,10 +144,10 @@ USE_TZ = True
 # Static files (CSS, JavaScript, Images)
 # https://docs.djangoproject.com/en/4.1/howto/static-files/
 
-STATIC_ROOT = os.path.join(BASE_DIR, 'static')
-STATIC_URL = '/static/'
+STATIC_ROOT = os.path.join(BASE_DIR, "static")
+STATIC_URL = "/static/"
 
-MEDIA_ROOT = os.path.join(BASE_DIR, 'files')
+MEDIA_ROOT = os.path.join(BASE_DIR, "files")
 MEDIA_URL = "/files/"
 
 AUTH_USER_MODEL = "user.User"
@@ -168,7 +166,7 @@ if DEBUG:
         "x-csrftoken",
         "x-requested-with",
     )
-    
+
     # CSRF Settings for development
     CSRF_TRUSTED_ORIGINS = [
         "http://localhost:8080",
@@ -177,9 +175,9 @@ if DEBUG:
         "http://127.0.0.1",
     ]
     CSRF_COOKIE_HTTPONLY = False
-    CSRF_COOKIE_SAMESITE = 'Lax'
+    CSRF_COOKIE_SAMESITE = "Lax"
     # Exempt API endpoints from CSRF (since they use Token Authentication)
-    CSRF_EXEMPT_URLS = [r'^api/.*$']
+    CSRF_EXEMPT_URLS = [r"^api/.*$"]
 
 # REST parameters
 REST_FRAMEWORK = {
@@ -195,15 +193,13 @@ REST_FRAMEWORK = {
         "rest_framework.authentication.SessionAuthentication",
         "rest_framework.authentication.TokenAuthentication",
     ],
-    "DEFAULT_FILTER_BACKENDS": [
-        "django_filters.rest_framework.DjangoFilterBackend"
-    ],
+    "DEFAULT_FILTER_BACKENDS": ["django_filters.rest_framework.DjangoFilterBackend"],
 }
 
 SPECTACULAR_SETTINGS = {
     "TITLE": "Backend Template",
     "DESCRIPTION": "Backend template API",
-    "VERSION": "1.0.0"
+    "VERSION": "1.0.0",
 }
 
 # django-rq task queueing
@@ -214,14 +210,10 @@ REDIS_CONF = {
     "DEFAULT_TIMEOUT": 60 * 60 * 24,
 }
 
-RQ_QUEUES = {
-    "email_sender": REDIS_CONF,
-    "default": REDIS_CONF,
-    "cronlike": REDIS_CONF
-}
+RQ_QUEUES = {"email_sender": REDIS_CONF, "default": REDIS_CONF, "cronlike": REDIS_CONF}
 
 RQ = {"DEFAULT_RESULT_TTL": 60 * 60 * 24}
-CRONLIKE_QUEUE = 'cronlike'
+CRONLIKE_QUEUE = "cronlike"
 
 # Custom handler to failed jobs
 RQ_EXCEPTION_HANDLERS = []
@@ -231,7 +223,7 @@ AUTHENTICATION_BACKENDS = ["backend.backend.CustomModelBackend"]
 # Default primary key field type
 # https://docs.djangoproject.com/en/4.1/ref/settings/#default-auto-field
 
-DEFAULT_AUTO_FIELD = 'django.db.models.BigAutoField'
+DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"
 
 USE_X_FORWARDED_HOST = True
-SECURE_PROXY_SSL_HEADER = ('HTTP_X_FORWARDED_PROTO', 'https')
+SECURE_PROXY_SSL_HEADER = ("HTTP_X_FORWARDED_PROTO", "https")
