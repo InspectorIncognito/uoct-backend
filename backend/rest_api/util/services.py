@@ -1,6 +1,7 @@
 import json
 
 import geopandas as gpd
+from pyproj import CRS
 from rest_api.models import Segment, Services, Shape
 from rest_api.util.gtfs import GTFSShapeManager
 from shapely.geometry import LineString as shp_LineString
@@ -29,7 +30,7 @@ def assign_routes_to_segments():
                 0.0005, cap_style="flat", join_style="bevel"
             )
             gdf_buffered = gpd.GeoDataFrame(
-                index=[0], crs="epsg:4326", geometry=[buffered]
+                index=[0], crs=CRS.from_string("EPSG:4326"), geometry=[buffered]
             )
             clipped = gpd.clip(gdf_routes, gdf_buffered)
             services = clipped["shape_id"].tolist()
