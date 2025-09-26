@@ -9,11 +9,13 @@ drf-spectacular==0.24.2
 gunicorn>=21.2.0
 psycopg2-binary>=2.9.5
 requests
+shapely
 typer
 geojson
-overpass==0.7
+overpass
 haversine
 gtfs-realtime-bindings==1.0.0
 networkx
 pandas
-geopandas==1.0.1
+geopandas
+jinja2
