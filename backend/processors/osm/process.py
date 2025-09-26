@@ -1,6 +1,6 @@
 import itertools
 import json
-from typing import List, Optional
+from typing import Dict, List, Optional
 
 import geojson
 import geopandas as gpd
@@ -15,13 +15,14 @@ from processors.geometry.utils import (
     interpolate_points_by_distance,
     linestring_distance,
 )
-from processors.osm.query import ALAMEDA_QUERY, overpass_query
+from processors.osm.query import EJES_PRINCIPALES, OSMDownloader, get_axis_config
 from pyproj.crs import CRS
 from rest_api.models import Segment, Shape
 from rest_api.util.shape import flush_shape_objects
-from shapely.geometry import LineString
+from shapely import Point, to_geojson
 from shapely.geometry import LineString as shp_LineString
-from shapely.geometry import Point
+from shapely.geometry import MultiLineString as shp_MultiLineString
+from shapely.geometry import Point as shp_Point
 from shapely.ops import linemerge, snap, unary_union
 
 
@@ -62,6 +63,9 @@ def split_axis_by_direction(
         oneway = (
             row["oneway"] if "oneway" in row and row["oneway"] is not None else "no"
         )
+        # Handle nan values from pandas DataFrame, is is nan, convert to "no"
+        if not isinstance(oneway, str):
+            oneway = "no"
 
         # Find existing group with similar bearing
         assigned = False
@@ -72,12 +76,13 @@ def split_axis_by_direction(
                 - abs(bearing - group_bearing),  # Handle wraparound (e.g., 350° vs 10°)
             )
 
-            if oneway == "no":
+            if oneway == "no" or oneway == "false" or oneway == "0":
                 group_indices.append(idx)
                 assigned = True
 
             if bearing_diff <= bearing_threshold:
-                group_indices.append(idx)
+                if idx not in group_indices:
+                    group_indices.append(idx)
                 assigned = True
 
         # Create new group if no similar bearing found
@@ -88,6 +93,7 @@ def split_axis_by_direction(
     result = []
     for group_indices in bearing_groups.values():
         group_df = df.loc[group_indices].copy()
+        group_df.set_crs(df.crs, allow_override=True, inplace=True)
         result.append(group_df)
 
     return result
@@ -106,7 +112,7 @@ def calculate_bearing(geometry):
     float or None
         Bearing in degrees (0-360), or None if calculation fails.
     """
-    if not isinstance(geometry, LineString) or len(geometry.coords) < 2:
+    if not isinstance(geometry, shp_LineString) or len(geometry.coords) < 2:
         return None
 
     import math
@@ -151,6 +157,10 @@ def merge_lines_with_metadata(gdf: gpd.GeoDataFrame) -> gpd.GeoDataFrame:
     if gdf.empty:
         return gdf
 
+    # Find connected components (groups of touching lines)
+    import networkx as nx
+    from networkx import Graph
+
     # Build connectivity graph
     G = Graph()
     for idx, geom in gdf.geometry.items():
@@ -178,25 +188,22 @@ def merge_lines_with_metadata(gdf: gpd.GeoDataFrame) -> gpd.GeoDataFrame:
         merged_geoms.append(merged_geom)
         # Aggregate metadata extract the most common value for each column
         meta = group_df.drop(columns="geometry").mode().iloc[0].to_dict()
+        meta = filter_metadata(meta)
+        meta["group_size"] = len(group_df)
         merged_metadata.append(meta)
 
     # Build new GeoDataFrame
     result_gdf = gpd.GeoDataFrame(merged_metadata, geometry=merged_geoms, crs=gdf.crs)
-    result_gdf = filter_short_lines(result_gdf, min_length_m=300.0)
     return result_gdf
 
 
-def filter_short_lines(
-    gdf: gpd.GeoDataFrame, min_length_m: float = 10.0
-) -> gpd.GeoDataFrame:
-    """Filter out LineStrings shorter than min_length_m (in meters) after the merge.
+def filter_short_lines(gdf: gpd.GeoDataFrame) -> gpd.GeoDataFrame:
+    """Filter out the shortest LineStrings if there is more than one.
 
     Parameters
     ----------
     gdf : gpd.GeoDataFrame
         Input GeoDataFrame with LineString geometries.
-    min_length_m : float, optional
-        Minimum length in meters to keep a LineString, by default 10.0
 
     Returns
     -------
@@ -205,94 +212,252 @@ def filter_short_lines(
     """
     if gdf.empty:
         return gdf
-
-    # Ensure CRS is set; Overpass / raw features often lack explicit CRS though they are WGS84
-    if gdf.crs is None:
-        # Assume WGS84 (lat/lon) if missing
-        try:
-            # Simple string approach
-            gdf.set_crs("EPSG:4326", inplace=True)
-        except Exception as e1:
-            try:
-                # Using CRS object properly
-                gdf.set_crs(CRS.from_epsg(4326), inplace=True)
-            except Exception as e2:
-                # Last resort
-                gdf.set_crs(CRS.from_user_input("EPSG:4326"), inplace=True)
-                print(f"Warning: Used fallback method to set CRS: {e1}, {e2}")
-
-    # Try to pick an appropriate projected CRS for length measurement
-    try:
-        metric_crs = gdf.estimate_utm_crs()
-        gm = gdf.to_crs(metric_crs).copy()
-    except Exception:
-        # Fallback to simple length calculation
-        gm = gdf.copy()
-        print(
-            "[filter_short_lines] Warning: failed to project geometries; lengths may be inaccurate."
-        )
-
+    orig_crs = gdf.crs
+    metric_crs = gdf.estimate_utm_crs() or "EPSG:3857"
+    gm = gdf.to_crs(metric_crs).copy()
     gm["length_m"] = gm.geometry.length
-    filtered_gm = gm[gm["length_m"] >= min_length_m]
-    # Reproject back only if projection succeeded and original CRS exists
-    if gm.crs != gdf.crs:
-        try:
-            filtered_gm = filtered_gm.to_crs(gdf.crs)
-        except Exception:
-            pass
-    return filtered_gm
+    if len(gm) > 1:
+        return gm[gm["length_m"] == gm["length_m"].max()].to_crs(orig_crs)
+    return gdf
 
 
-def connect_lines(gdf: gpd.GeoDataFrame) -> Optional[gpd.GeoDataFrame]:
+def filter_metadata(metadata: dict) -> dict:
+    """Filter metadata dictionary to keep only specified keys."""
+    bus_metadata = [
+        "lanes:bus",
+        "bus",
+        "psv:lanes",
+    ]
+    for key in bus_metadata:
+        if key in metadata and metadata[key] in ["yes", "designated", "lane"]:
+            metadata["bus"] = True
+            break
+    else:
+        metadata["bus"] = False
+
+    keys_to_keep = [
+        "highway",
+        "lanes",
+        "bus",
+        "oneway",
+        "direction_group",
+        "group_size",
+        "eje_name",
+        "length_m",
+    ]
+
+    return {k: v for k, v in metadata.items() if k in keys_to_keep}
+
+
+def keep_main_axis_lines(gdf, tol=1e-6):
     """
-    Function to connect gaps between LineStrings in a GeoDataFrame. This gaps can be up to 250 meters long.
-    For example, in the axis Alameda, there is a gap between Avenida Nueva Providencia and Avenida Providencia a section of Avenida Vitacura is in between.
+    Filtra un GeoDataFrame con una sola fila de tipo MultiLineString,
+    eliminando líneas paralelas y ramas (salidas) que no corresponden al eje principal.
+    """
+    if gdf.empty:
+        return gdf
+
+    orig_crs = gdf.crs
+    # Asegurar CRS de entrada y reproyectar a CRS métrico para distancias
+    if gdf.crs is None:
+        # Si no hay CRS original, asumimos WGS84 para devolver en ese CRS
+        orig_crs = "EPSG:4326"
+        gdf = gdf.set_crs(4326, allow_override=True)
+    metric_crs = gdf.estimate_utm_crs() or "EPSG:3857"
+    gdf_copy = gdf.to_crs(metric_crs)  # Usar CRS métrico para cálculos de distancia
+
+    multi = gdf_copy.geometry.iloc[0]
+    if multi.geom_type != "MultiLineString":
+        return gdf
+
+    lines = list(multi.geoms)
+    endpoints = [(Point(l.coords[0]), Point(l.coords[-1])) for l in lines]
+
+    parallel_keep, parallel_drop = set(), set()
+
+    for i in range(len(lines)):
+        for j in range(i + 1, len(lines)):
+            s1, e1 = endpoints[i]
+            s2, e2 = endpoints[j]
+
+            # --- misma lógica que tu función original ---
+            same_start = s1.distance(s2) < tol or s1.distance(e2) < tol
+            same_end = e1.distance(s2) < tol or e1.distance(e2) < tol
+
+            if same_start and same_end:
+                # Líneas paralelas
+                # Quedarse con la más corta
+                drop = i if lines[i].length > lines[j].length else j
+                parallel_drop.add(drop)
+                parallel_keep.add(j if drop == i else i)
+                continue
+
+    keep_idx = [k for k in range(len(lines)) if k not in parallel_drop]
+
+    # Eliminar las branches
+    branches_idx = remove_branches(lines, keep_idx, parallel_keep)
+    keep_idx = [k for k in keep_idx if k not in branches_idx]
+
+    # Crear nuevo GeoDataFrame
+    attrs = gdf_copy.iloc[0].drop("geometry").to_dict()
+    geoms_to_keep = [lines[k] for k in keep_idx]
+    rows = [attrs] * len(geoms_to_keep)
+    result_gdf = gpd.GeoDataFrame(rows, geometry=geoms_to_keep, crs=gdf_copy.crs)
+    result_gdf = result_gdf.to_crs(orig_crs)
+    return result_gdf
+
+
+def remove_branches(lines, keep_idx, parallel_keep, tol=1e-6):
+    """
+    Detecta y elimina líneas que son ramas o salidas del eje principal.
+    Una rama se define como una línea que comparte un extremo con otra línea,
+    pero cuyo otro extremo está alejado (más allá de una tolerancia).
+
+    Parámetros
+    ----------
+    gdf : gpd.GeoDataFrame
+        GeoDataFrame con las líneas a analizar.
+    keep_idx : list
+        Índices de las líneas que se mantienen (no paralelas).
+    tol : float
+        Tolerancia en metros para considerar dos puntos como iguales.
+
+    Returns
+    -------
+    set
+        Conjunto de índices de líneas que son ramas y deben eliminarse.
+    """
+    endpoints = [(Point(l.coords[0]), Point(l.coords[-1])) for l in lines]
+    branches = set()
+    keep_idx = set(keep_idx) - set(parallel_keep)
+    for i in keep_idx:
+        for j in keep_idx:
+            if i == j:
+                continue
+            s1, e1 = endpoints[i]
+            s2, e2 = endpoints[j]
+
+            # Caso: comparten un extremo (start o end) pero el otro extremo está alejado
+            shared_start = s1.distance(s2) < tol or s1.distance(e2) < tol
+            shared_end = e1.distance(s2) < tol or e1.distance(e2) < tol
+
+            if shared_start and not shared_end:
+                drop = i if lines[i].length < lines[j].length else j
+                branches.add(drop)
+
+    return branches
+
+
+def _get_linestring_extremes(idx: int, geom: shp_LineString) -> list:
+    """Extract extreme points from a LineString geometry.
+
+    Parameters
+    ----------
+    idx : int
+        Index of the geometry in the GeoDataFrame
+    geom : LineString
+        The LineString geometry
+
+    Returns
+    -------
+    list
+        List of dictionaries containing line_id, end_idx, and geometry (Point)
+    """
+    return [
+        {"line_id": idx, "end_idx": 0, "geometry": Point(geom.coords[0])},
+        {"line_id": idx, "end_idx": -1, "geometry": Point(geom.coords[-1])},
+    ]
+
+
+def _get_multilinestring_extremes(idx: int, geom: shp_MultiLineString) -> list:
+    """Extract extreme points from a MultiLineString geometry.
+
+    Parameters
+    ----------
+    idx : int
+        Index of the geometry in the GeoDataFrame
+    geom : MultiLineString
+        The MultiLineString geometry
+
+    Returns
+    -------
+    list
+        List of dictionaries containing line_id, end_idx, and geometry (Point)
+    """
+    lines = list(geom.geoms)
+    if not lines:
+        return []
+
+    # Consider the first and last coordinates of the first and last LineString
+    return [
+        {
+            "line_id": idx,
+            "end_idx": 0,
+            "geometry": Point(lines[0].coords[0]),
+        },
+        {
+            "line_id": idx,
+            "end_idx": -1,
+            "geometry": Point(lines[-1].coords[-1]),
+        },
+    ]
+
+
+def connect_lines(
+    gdf: gpd.GeoDataFrame, max_distance_m: float = 450.0
+) -> Optional[gpd.GeoDataFrame]:
+    """
+    Function to connect gaps between LineStrings in a GeoDataFrame.
 
     Parameters
     ----------
     gdf : gpd.GeoDataFrame
-        Input GeoDataFrame with LineString geometries.
+        Input GeoDataFrame with LineString or MultiLineString geometries.
+    max_distance_m : float, default 450.0
+        Maximum distance in meters to consider for connections.
+
     Returns
     -------
     Optional[gpd.GeoDataFrame]
         GeoDataFrame with connected LineStrings or None if input is empty.
     """
     if gdf.empty:
-        print("Input GeoDataFrame is empty. No lines to connect.")
         return None
 
     try:
         # Ensure the GeoDataFrame has a valid CRS
         if gdf.crs is None:
-            print(
-                "Input GeoDataFrame has no CRS. Setting to WGS84 (EPSG:4326) by default."
-            )
-            gdf = gdf.set_crs(epsg=4326, inplace=True)
+            gdf = gdf.set_crs(epsg=4326, allow_override=True)
         elif gdf.crs.to_epsg() != 4326:
             gdf = gdf.to_crs(epsg=4326)
 
         # Ensure that it have more than one line to connect
         if len(gdf) < 2:
-            print(
-                "Input GeoDataFrame has less than two LineStrings. No connections needed."
-            )
-            return gdf
+            if isinstance(gdf.iloc[0].geometry, shp_MultiLineString):
+                if len(gdf.iloc[0].geometry.geoms) < 2:
+                    return gdf
+            elif isinstance(gdf.iloc[0].geometry, shp_LineString):
+                return gdf
 
-        # Get the extremes points of each LineString, is not sure that coords[0] is the start or the end
+        # Get the extremes points of each geometry
         extremes = []
         for idx, geom in enumerate(gdf.geometry):
-            if isinstance(geom, LineString):
-                extremes.append(
-                    {"line_id": idx, "end_idx": 0, "geometry": Point(geom.coords[0])}
-                )
-                extremes.append(
-                    {"line_id": idx, "end_idx": -1, "geometry": Point(geom.coords[-1])}
-                )
+            if isinstance(geom, shp_LineString) or geom.geom_type == "LineString":
+                extremes.extend(_get_linestring_extremes(idx, geom))
+            elif (
+                isinstance(geom, shp_MultiLineString)
+                or geom.geom_type == "MultiLineString"
+            ):
+                extremes.extend(_get_multilinestring_extremes(idx, geom))
             else:
-                print("Non-LineString geometry found. Skipping.")
                 continue
+
+        if len(extremes) < 4:  # Need at least 2 geometries with 2 extremes each
+            return gdf
+
         extremes_gdf = gpd.GeoDataFrame(extremes, crs=gdf.crs).to_crs(epsg=3857)
-        # Find pairs of extremes that are within 250 meters
+
+        # Find pairs of extremes that are within max_distance_m
         shortest_distance = float("inf")
         closest_pair = None
         for row1, row2 in itertools.product(
@@ -301,42 +466,55 @@ def connect_lines(gdf: gpd.GeoDataFrame) -> Optional[gpd.GeoDataFrame]:
             if row1.line_id == row2.line_id:
                 continue
             dist = row1.geometry.distance(row2.geometry)
-            if dist < shortest_distance and dist <= 350:
+            if dist < shortest_distance and dist <= max_distance_m:
                 shortest_distance = dist
                 closest_pair = (row1, row2)
+
         if not closest_pair:
-            print("No pairs of extremes found within 350 meters. No connections made.")
             return gdf
 
         line1 = gdf.iloc[closest_pair[0].line_id].geometry
         line2 = gdf.iloc[closest_pair[1].line_id].geometry
 
-        # Reordenar coordenadas según el extremo seleccionado
-        coords1 = list(line1.coords)
-        coords2 = list(line2.coords)
+        # Extract all coordinates from geometries
+        def extract_all_coords(geom):
+            """Extract all coordinates from LineString or MultiLineString."""
+            if isinstance(geom, shp_MultiLineString):
+                all_coords = []
+                for line in geom.geoms:
+                    all_coords.extend(list(line.coords))
+                return all_coords
+            else:
+                return list(geom.coords)
 
+        coords1 = extract_all_coords(line1)
+        coords2 = extract_all_coords(line2)
+
+        # Reorder coordinates according to the selected extreme
         if closest_pair[0].end_idx == 0:
             coords1 = coords1[::-1]
         if closest_pair[1].end_idx == -1:
             coords2 = coords2[::-1]
 
         new_coords = coords1 + coords2
-        new_line = LineString(new_coords)
+        new_line = shp_LineString(new_coords)
 
         # Create a new GeoDataFrame with the new connected line
         new_gdf = gpd.GeoDataFrame(geometry=[new_line], crs=gdf.crs)
+        # Add metadata if available
+        for col in gdf.columns:
+            if col != "geometry":
+                new_gdf[col] = gdf.iloc[closest_pair[0].line_id][col]
         remaining_gdf = gdf.drop(
             index=[closest_pair[0].line_id, closest_pair[1].line_id]
         ).reset_index(drop=True)
         result_gdf = pd.concat([remaining_gdf, new_gdf], ignore_index=True)
         result_gdf = result_gdf.to_crs(epsg=4326)
 
-        # Retrun a LineString if only one line remains
         if len(result_gdf) == 1:
-            return result_gdf.geometry.iloc[0]
-
-        print("Multiple lines remain after merging.")
-        return result_gdf
+            return result_gdf
+        else:
+            return connect_lines(result_gdf, max_distance_m)
 
     except Exception as e:
         print(f"Error connecting lines: {e}")
@@ -366,18 +544,28 @@ def iterate_coords(geom):
 
 
 def segment_shape_by_distance(
-    shape: shp_LineString,
+    shape: gpd.GeoDataFrame,
     distance_threshold: float = 500,
     distance_algorithm: str = "euclidean",
-):
+) -> List[shp_LineString]:
     if distance_threshold <= 0:
         raise ValueError("distance_threshold must be greater than 0.")
     output_linestrings = []
-    geom = shape
+    geom = shape.geometry.iloc[0]
+    if not isinstance(geom, (shp_LineString, shp_MultiLineString)):
+        raise ValueError("Input geometry must be a LineString or MultiLineString.")
 
     previous_point = None
     segment = []
     distance_accum = 0
+
+    # Get the last coordinate to check against later
+    last_point = None
+    if geom.geom_type.startswith("Multi"):
+        last_point = list(geom.geoms[-1].coords)[-1]
+    else:
+        last_point = list(geom.coords)[-1]
+
     for point in iterate_coords(geom):
         lon, lat = point
         current_point = Point(lon, lat)
@@ -402,7 +590,7 @@ def segment_shape_by_distance(
             output_linestrings.append(line)
             previous_point = current_point
             segment = [current_point]
-            if point == geom.geoms[-1].coords[-1]:
+            if point == last_point:
                 segment = []
             distance_accum = 0
         else:
@@ -420,43 +608,61 @@ def save_segmented_shape_to_db(segmented_shape: List[shp_LineString], shape_name
         shape.add_segment(sequence=sequence, geometry=segment)
 
 
-def save_all_segmented_shapes_to_db(segmented_shapes: List[List[shp_LineString]]):
-    flush_shape_objects()
+def save_all_segmented_shapes_to_db(
+    segmented_shapes: List[List[shp_LineString]], flush: bool = True
+):
+    if flush:
+        flush_shape_objects()
     for idx, segmented_shape in enumerate(segmented_shapes):
         save_segmented_shape_to_db(segmented_shape, shape_name=f"shape_{idx}")
 
 
+# Funtion to process all the shape data from OSM
+def process_osm_queries(distance_threshold: float = 500.0, use_fixtures: bool = False):
+    """Process all the queries in EJES_PRINCIPALES, downloading data from OSM Overpass API,
+    or using local fixtures if use_fixtures is True. Segments the shapes by distance_threshold
+    """
+    if use_fixtures:
+        process_fixture_data(distance_threshold)
+    else:
+        osm_downloader = OSMDownloader()
+        for idx, query_name in enumerate(EJES_PRINCIPALES.keys()):
+            axis_config = get_axis_config(query_name)
+            query = osm_downloader.build_overpass_query(
+                place=axis_config["city"],
+                highway_type=axis_config["highway_type"],
+                streets=axis_config["streets"],
+            )
+            axis = osm_downloader.execute_query(query)
+            if idx == 0:
+                flush = True
+            else:
+                flush = False
+            process_shape_data(query_name, axis, distance_threshold, flush=flush)
+
+
 # Crea la consulta, separa los distintos shapes, los mergea y divide en segmentos de 'distance_threshold' metros."
 # Almacena toda la información en la db
-def process_shape_data(distance_threshold: float = 500.0):
-    print("Downloading OSM Overpass data...")
-    print(f"Query:\n{ALAMEDA_QUERY}")
-    query = overpass_query(ALAMEDA_QUERY)
-    print(f"Number of features downloaded: {len(query['features'])}")
-    # Save result
-    filepath = "osm_overpass_query_result.geojson"
-    print(f"Saving Overpass query result to {filepath}...")
-    with open(filepath, "w", encoding="utf-8") as f:
-        geojson.dump(query, f, ensure_ascii=False, indent=2)
+def process_shape_data(
+    axis_name: str, axis: Dict, distance_threshold: float = 500.0, flush: bool = True
+):
     # Extract features with valid geometry
-    query_data = gpd.GeoDataFrame.from_features(query, crs="EPSG:4326")
-    print(f"Created GeoDataFrame with {len(query_data)} features")
-    print(f"Columns: {query_data.columns.tolist()}")
-    print(
-        f"Tags example: {query_data['tags'].iloc[0] if 'tags' in query_data.columns else 'N/A'}"
-    )
-    print("splitting by shape..")
-    splitted_geojson = split_axis_by_direction(query_data, bearing_threshold=90.0)
+    query_data = gpd.GeoDataFrame.from_features(axis, crs="EPSG:4326")
+    splitted_gdf = split_axis_by_direction(query_data, bearing_threshold=90.0)
     segmented_shapes = []
-    print(f"Got {len(splitted_geojson)} different shapes")
-    for feature in splitted_geojson:
-        merged = merge_lines_with_metadata(feature)
-        connected = connect_lines(merged)
+    for i, group_gdf in enumerate(splitted_gdf):
+        group_gdf["direction_group"] = i
+        group_gdf["group_size"] = len(group_gdf)
+        group_gdf["eje_name"] = axis_name
+        merged = merge_lines_with_metadata(group_gdf)
+        one_road_gdf = keep_main_axis_lines(merged)
+        conected_gdf = connect_lines(one_road_gdf, max_distance_m=500.0)
+        filtered_gdf = filter_short_lines(conected_gdf)
         segmented = segment_shape_by_distance(
-            connected, distance_threshold, distance_algorithm="haversine"
+            filtered_gdf, distance_threshold, distance_algorithm="haversine"
         )
         segmented_shapes.append(segmented)
-    save_all_segmented_shapes_to_db(segmented_shapes)
+    save_all_segmented_shapes_to_db(segmented_shapes, flush=flush)
 
 
 def process_fixture_data(distance_threshold: float = 500.0):
