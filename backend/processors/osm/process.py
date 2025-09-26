@@ -609,12 +609,17 @@ def save_segmented_shape_to_db(segmented_shape: List[shp_LineString], shape_name
 
 
 def save_all_segmented_shapes_to_db(
-    segmented_shapes: List[List[shp_LineString]], flush: bool = True
+    segmented_shapes: List[List[shp_LineString]],
+    flush: bool = True,
+    shape_name: str = None,
 ):
     if flush:
         flush_shape_objects()
     for idx, segmented_shape in enumerate(segmented_shapes):
-        save_segmented_shape_to_db(segmented_shape, shape_name=f"shape_{idx}")
+        save_segmented_shape_to_db(
+            segmented_shape,
+            shape_name=f"shape_{idx}" if shape_name is None else shape_name,
+        )
 
 
 # Funtion to process all the shape data from OSM
@@ -662,7 +667,7 @@ def process_shape_data(
             filtered_gdf, distance_threshold, distance_algorithm="haversine"
         )
         segmented_shapes.append(segmented)
-    save_all_segmented_shapes_to_db(segmented_shapes, flush=flush)
+    save_all_segmented_shapes_to_db(segmented_shapes, flush=flush, shape_name=axis_name)
 
 
 def process_fixture_data(distance_threshold: float = 500.0):
