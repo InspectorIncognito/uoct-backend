@@ -2,16 +2,15 @@ import uuid
 
 from django.contrib.postgres.fields import ArrayField
 from django.db import models
-from shapely.geometry import LineString as shp_LineString
-from geojson.geometry import LineString
-from geojson.feature import Feature
-
-from rest_api.util.temporal_segment import get_last_temporal_segment_data
-from velocity.constants import DEG_PI, DEG_PI_HALF
-from processors.geometry.point import Point
 from django.utils import timezone
+from geojson.feature import Feature
+from geojson.geometry import LineString
+from gtfs_rt.utils import get_day_type, get_temporal_segment
+from processors.geometry.point import Point
+from rest_api.util.temporal_segment import get_last_temporal_segment_data
 from rest_api.vars import SPEED_COLOR_RANGES
-from gtfs_rt.utils import get_temporal_segment, get_day_type
+from shapely.geometry import LineString as shp_LineString
+from velocity.constants import DEG_PI, DEG_PI_HALF
 
 
 class Shape(models.Model):
@@ -22,15 +21,11 @@ class Shape(models.Model):
     grid_max_lon = models.FloatField(default=-DEG_PI)
 
     def get_segments(self):
-        return Segment.objects.filter(shape=self).order_by('sequence')
+        return Segment.objects.filter(shape=self).order_by("sequence")
 
     def add_segment(self, sequence: int, geometry: shp_LineString) -> None:
         points = list(geometry.coords)
-        shape_data = {
-            "shape": self,
-            "sequence": sequence,
-            "geometry": points
-        }
+        shape_data = {"shape": self, "sequence": sequence, "geometry": points}
         for point in points:
             self.grid_min_lat = min(self.grid_min_lat, point[1])
             self.grid_max_lat = max(self.grid_max_lat, point[1])
@@ -41,7 +36,12 @@ class Shape(models.Model):
         self.save()
 
     def get_bbox(self):
-        return [self.grid_min_lon, self.grid_min_lat, self.grid_max_lon, self.grid_max_lat]
+        return [
+            self.grid_min_lon,
+            self.grid_min_lat,
+            self.grid_max_lon,
+            self.grid_max_lat,
+        ]
 
     def to_geojson(self):
         segments = Segment.objects.filter(shape=self).all()
@@ -83,10 +83,12 @@ class Segment(models.Model):
 
     def get_distance(self):
         accum_distance = 0
-        previous_point = Point(latitude=self.geometry[0][1], longitude=self.geometry[0][0])
+        previous_point = Point(
+            latitude=self.geometry[0][1], longitude=self.geometry[0][0]
+        )
         for point in self.geometry[1:]:
             current_point = Point(latitude=point[1], longitude=point[0])
-            distance = current_point.distance(previous_point, algorithm='haversine')
+            distance = current_point.distance(previous_point, algorithm="haversine")
             accum_distance += distance
             previous_point = current_point
         return accum_distance
@@ -97,24 +99,32 @@ class Segment(models.Model):
             sequence=self.sequence,
         )
         date, day_type, temporal_segment = get_last_temporal_segment_data()
-        speed = Speed.objects.filter(segment=self, timestamp__date=date, temporal_segment=temporal_segment).first()
+        speed = Speed.objects.filter(
+            segment=self, timestamp__date=date, temporal_segment=temporal_segment
+        ).first()
 
         if speed:
-            alert = Alert.objects.filter(segment=self, temporal_segment=speed.temporal_segment).first()
+            alert = Alert.objects.filter(
+                segment=self, temporal_segment=speed.temporal_segment
+            ).first()
             if alert:
-                properties['alert_id'] = alert.pk
+                properties["alert_id"] = alert.pk
             properties.update(speed.check_value())
         else:
             properties["speed"] = "Sin registro"
             properties["color"] = "#DDDDDD"
 
-        historic_speed = (HistoricSpeed.objects.filter(segment=self, day_type=day_type,
-                                                       temporal_segment=temporal_segment)
-                          .order_by('-timestamp').first())
+        historic_speed = (
+            HistoricSpeed.objects.filter(
+                segment=self, day_type=day_type, temporal_segment=temporal_segment
+            )
+            .order_by("-timestamp")
+            .first()
+        )
         if historic_speed:
-            properties['historic_speed'] = historic_speed.speed
+            properties["historic_speed"] = historic_speed.speed
         else:
-            properties['historic_speed'] = 'Sin registro'
+            properties["historic_speed"] = "Sin registro"
 
         services = Services.objects.filter(segment=self).first()
         if services:
@@ -122,8 +132,7 @@ class Segment(models.Model):
         line = shp_LineString(coordinates=self.geometry)
         line = line.simplify(tolerance=0.00001)
         feature = Feature(
-            geometry=LineString(coordinates=list(line.coords)),
-            properties=properties
+            geometry=LineString(coordinates=list(line.coords)), properties=properties
         )
         return feature
 
@@ -171,11 +180,15 @@ class Speed(models.Model):
         geojson_data["speed"] = self.get_speed()
         geojson_data["color"] = self.assign_color()
         geojson_data["temporal_segment"] = self.temporal_segment
-        historic_speed: HistoricSpeed = HistoricSpeed.objects.filter(
-            segment=self.segment,
-            day_type=self.day_type,
-            temporal_segment=self.temporal_segment,
-        ).order_by("-timestamp").first()
+        historic_speed: HistoricSpeed = (
+            HistoricSpeed.objects.filter(
+                segment=self.segment,
+                day_type=self.day_type,
+                temporal_segment=self.temporal_segment,
+            )
+            .order_by("-timestamp")
+            .first()
+        )
         if historic_speed is not None:
             geojson_data["historic_speed"] = str(historic_speed.speed)
         else:
@@ -237,7 +250,7 @@ class Alert(models.Model):
         temporal_segment = str(self.temporal_segment)
         speed = str(self.detected_speed.get_speed())
         key_values = [shape, sequence, day_type, temporal_segment, speed]
-        return '|'.join(key_values)
+        return "|".join(key_values)
 
 
 class Services(models.Model):
@@ -254,11 +267,11 @@ class GTFSShape(models.Model):
         return Feature(
             geometry=LineString(coordinates=self.geometry),
             properties={
-                'shape_id': str(self.shape_id),
-                'direction': str(self.direction)
-            }
+                "shape_id": str(self.shape_id),
+                "direction": str(self.direction),
+            },
         )
 
 
 class GTFSRTTimestamp(SingletonModel):
-    last_timestamp = models.CharField(default='', max_length=124)
+    last_timestamp = models.CharField(default="", max_length=124)
