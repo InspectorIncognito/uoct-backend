@@ -1,5 +1,7 @@
 import itertools
 import json
+import math
+import os
 from typing import Dict, List, Optional
 
 import geojson
@@ -94,6 +96,7 @@ def split_axis_by_direction(
     for group_indices in bearing_groups.values():
         group_df = df.loc[group_indices].copy()
         group_df.set_crs(df.crs, allow_override=True, inplace=True)
+        group_df["bearing"] = group_df.geometry.apply(calculate_bearing)
         result.append(group_df)
 
     return result
@@ -114,8 +117,6 @@ def calculate_bearing(geometry):
     """
     if not isinstance(geometry, shp_LineString) or len(geometry.coords) < 2:
         return None
-
-    import math
 
     # Get start and end points
     start = geometry.coords[0]
@@ -229,11 +230,11 @@ def filter_metadata(metadata: dict) -> dict:
         "psv:lanes",
     ]
     for key in bus_metadata:
-        if key in metadata and metadata[key] in ["yes", "designated", "lane"]:
+        if (key in metadata) and (metadata[key] in ["yes", "designated", "lane"]):
             metadata["bus"] = True
             break
-    else:
-        metadata["bus"] = False
+        else:
+            metadata["bus"] = False
 
     keys_to_keep = [
         "highway",
@@ -244,6 +245,7 @@ def filter_metadata(metadata: dict) -> dict:
         "group_size",
         "eje_name",
         "length_m",
+        "bearing",
     ]
 
     return {k: v for k, v in metadata.items() if k in keys_to_keep}
@@ -521,6 +523,35 @@ def connect_lines(
         return gdf
 
 
+def orient_linestring_by_bearing(
+    line: shp_LineString, target_bearing: float
+) -> shp_LineString:
+    """
+    Reordena la LineString para que su bearing inicial sea consistente
+    con target_bearing (0-360). Si la diferencia es mayor a 90°, invierte.
+    """
+
+    def bearing_of_coords(a, b):
+        lat1, lon1 = math.radians(a[1]), math.radians(a[0])
+        lat2, lon2 = math.radians(b[1]), math.radians(b[0])
+        dlon = lon2 - lon1
+        y = math.sin(dlon) * math.cos(lat2)
+        x = math.cos(lat1) * math.sin(lat2) - math.sin(lat1) * math.cos(
+            lat2
+        ) * math.cos(dlon)
+        brng = math.degrees(math.atan2(y, x))
+        return (brng + 360) % 360
+
+    coords = list(line.coords)
+    start_bearing = bearing_of_coords(coords[0], coords[-1])
+    diff = min(
+        abs(start_bearing - target_bearing), 360 - abs(start_bearing - target_bearing)
+    )
+    if diff > 90:  # está casi al revés
+        return shp_LineString(coords[::-1])
+    return line
+
+
 def iterate_coords(geom):
     """Iterate over the coordinates of a geometry. If the geometry is a MultiGeometry, it will iterate over all sub-geometries.
 
@@ -547,7 +578,7 @@ def segment_shape_by_distance(
     shape: gpd.GeoDataFrame,
     distance_threshold: float = 500,
     distance_algorithm: str = "euclidean",
-) -> List[shp_LineString]:
+) -> gpd.GeoDataFrame:
     if distance_threshold <= 0:
         raise ValueError("distance_threshold must be greater than 0.")
     output_linestrings = []
@@ -599,26 +630,58 @@ def segment_shape_by_distance(
             segment.append(current_point)
     if len(segment) != 0:
         output_linestrings.append(shp_LineString(segment))
-    return output_linestrings
+
+    # Path rectification using Douglas-Peucker algorithm
+    gdf_segments = gpd.GeoDataFrame(geometry=output_linestrings, crs="EPSG:4326")
+    gdf_segments = gdf_segments.to_crs("EPSG:3857")  # reproyectar a metros
+    print("Preparado para simplificar, segmentos:", len(gdf_segments))
+    gdf_segments["geometry"] = gdf_segments.simplify(
+        tolerance=4, preserve_topology=True
+    )  # 4 metros de tolerancia
+    gdf_segments = gdf_segments.to_crs("EPSG:4326")
+    print("Segmentos simplificados:", len(gdf_segments))
+
+    # Add metadata to segments
+    for col in shape.columns:
+        if col != "geometry":
+            gdf_segments[col] = shape.iloc[0][col]
+
+    return gdf_segments
 
 
-def save_segmented_shape_to_db(segmented_shape: List[shp_LineString], shape_name: str):
+def save_segmented_shape_to_db(
+    segmented_shape: List[shp_LineString], shape_name: str, lanes=None, bus=None
+):
     shape = Shape.objects.create(**{"name": shape_name})
+    print("Created shape:", shape_name, "adding segments:", len(segmented_shape))
     for sequence, segment in enumerate(segmented_shape):
         shape.add_segment(sequence=sequence, geometry=segment)
 
 
 def save_all_segmented_shapes_to_db(
-    segmented_shapes: List[List[shp_LineString]],
+    segmented_shapes: List[gpd.GeoDataFrame],
     flush: bool = True,
     shape_name: str = None,
 ):
     if flush:
+        print("Flushing existing Shape and Segment objects from DB...")
         flush_shape_objects()
+        print("Flushed existing Shape and Segment objects from DB.")
     for idx, segmented_shape in enumerate(segmented_shapes):
+        if shape_name is not None:
+            shape_name_ = f"{shape_name}_{segmented_shape['direction_group'].iloc[0]}"
+        print("Segmented shape to save:", shape_name_)
+        lanes = segmented_shape["lanes"].iloc[0] if "lanes" in segmented_shape else None
+        print("Lanes:", lanes)
+        bus = segmented_shape["bus"].iloc[0] if "bus" in segmented_shape else None
+        print("Bus:", bus)
+
+        print("Saving segmented shape to DB:", shape_name_)
         save_segmented_shape_to_db(
-            segmented_shape,
-            shape_name=f"shape_{idx}" if shape_name is None else shape_name,
+            segmented_shape.geometry.tolist(),
+            shape_name=shape_name_,
+            lanes=lanes,
+            bus=bus,
         )
 
 
@@ -663,10 +726,25 @@ def process_shape_data(
         one_road_gdf = keep_main_axis_lines(merged)
         conected_gdf = connect_lines(one_road_gdf, max_distance_m=500.0)
         filtered_gdf = filter_short_lines(conected_gdf)
+        print("Filtered lines:", len(filtered_gdf))
+        target_bearing = group_gdf["bearing"].mean()  # o la media del grupo
+        print("Target bearing:", target_bearing)
+        filtered_gdf["geometry"] = filtered_gdf.geometry.apply(
+            lambda g: orient_linestring_by_bearing(g, target_bearing)
+        )
+        print("Segmenting shape with distance threshold:", distance_threshold)
         segmented = segment_shape_by_distance(
             filtered_gdf, distance_threshold, distance_algorithm="haversine"
         )
+        # Save segmented shapes to a geojson file for debugging
+        file_path = "debug"
+        if not os.path.exists(file_path):
+            os.makedirs(file_path)
+        segmented.to_file(
+            f"{file_path}/segmented_shape_{axis_name}_{i}.geojson", driver="GeoJSON"
+        )
         segmented_shapes.append(segmented)
+    print("Saving all segmented shapes to DB...")
     save_all_segmented_shapes_to_db(segmented_shapes, flush=flush, shape_name=axis_name)
 
 
