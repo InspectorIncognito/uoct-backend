@@ -698,7 +698,6 @@ def process_osm_queries(distance_threshold: float = 500.0, use_fixtures: bool = 
             axis_config = get_axis_config(query_name)
             query = osm_downloader.build_overpass_query(
                 place=axis_config["city"],
-                highway_type=axis_config["highway_type"],
                 streets=axis_config["streets"],
             )
             axis = osm_downloader.execute_query(query)

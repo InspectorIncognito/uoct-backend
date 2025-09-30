@@ -22,7 +22,6 @@ out geom meta;"""
 EJES_PRINCIPALES = {
     "Eje Alameda": {
         "city": "Provincia de Santiago",
-        "highway_type": "primary",
         "streets": [
             "Avenida Libertador Bernardo O'Higgins",
             "Avenida Providencia",
@@ -32,37 +31,54 @@ EJES_PRINCIPALES = {
     },
     "Eje Vicuña Mackenna": {
         "city": "Provincia de Santiago",
-        "highway_type": "primary",
         "streets": [
             "Avenida Vicuña Mackenna",
             "Avenida Vicuña Mackenna Poniente",
             "Avenida Vicuña Mackenna Oriente",
         ],
     },
-    "Eje Pedro de Valdivia": {
+    "Eje La Florida - Los Leones": {
         "city": "Provincia de Santiago",
-        "highway_type": "secondary",
-        "streets": ["Avenida Pedro de Valdivia"],
+        "streets": [
+            "Avenida La Florida",
+            "Avenida Macul",
+            "Avenida José Pedro Alessandri",
+            "Avenida Chile España",
+            "General José Artigas",
+            "Avenida Los Leones",
+        ],
     },
-    "Eje 5 de Abril": {
+    "Eje 5 de Abril - Matta": {
         "city": "Provincia de Santiago",
-        "highway_type": "secondary",
-        "streets": ["Avenida 5 de Abril"],
-    },
-    "Eje Matta": {
-        "city": "Provincia de Santiago",
-        "highway_type": "secondary",
-        "streets": ["Avenida Manuel Antonio Matta", "Avenida Grecia"],
+        "streets": [
+            "Avenida 5 de Abril",
+            "Avenida Simón Bolívar",
+            "Arica",
+            "Avenida Almirante Blanco Encalada",
+            "Avenida Tupper",
+            "Avenida Manuel Antonio Matta",
+            "Avenida Grecia",
+        ],
     },
     "Eje Gran Avenida": {
         "city": "Provincia de Santiago",
-        "highway_type": "primary",
         "streets": ["Gran Avenida José Miguel Carrera", "San Diego", "Nataniel Cox"],
     },
     "Eje independencia": {
         "city": "Provincia de Santiago",
-        "highway_type": "primary",
         "streets": ["Avenida Independencia"],
+    },
+    "Eje Santa Rosa": {
+        "city": "Provincia de Santiago",
+        "streets": ["Avenida Santa Rosa", "San Francisco"],
+    },
+    "Eje Irarrazabal": {
+        "city": "Provincia de Santiago",
+        "streets": [
+            "Avenida Irarrazabal",
+            "Avenida Larraín",
+            "Avenida Alcalde Fernando Castillo Velasco",
+        ],
     },
 }
 
@@ -148,7 +164,7 @@ class OSMDownloader:
             raise Exception(f"Error connecting to Nominatim API: {e}")
 
     def build_overpass_query(
-        self, place: str, highway_type: str, streets: List[str]
+        self, place: str, streets: List[str]
     ) -> str:
         """Build an Overpass API query for a specific city, highway type, and list of streets.
 
@@ -156,8 +172,6 @@ class OSMDownloader:
         ----------
         place : str
             The name of the place to search in.
-        highway_type : str
-            The type of highway to search for (e.g., "primary").
         streets : List[str]
             The names of the streets to include in the query.
 
@@ -178,7 +192,7 @@ class OSMDownloader:
             print(f"Relation ID for {place}: {relation_id}")
 
             return OVERPASS_TEMPLATE.render(
-                relation_id=relation_id, highway_type=highway_type, streets=streets
+                relation_id=relation_id, streets=streets
             )
 
         except Exception as e:
