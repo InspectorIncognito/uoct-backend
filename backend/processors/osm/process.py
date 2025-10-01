@@ -226,11 +226,12 @@ def filter_metadata(metadata: dict) -> dict:
     """Filter metadata dictionary to keep only specified keys."""
     bus_metadata = [
         "lanes:bus",
-        "bus",
+        "psv:lanes",
+        "bus:lanes",
         "psv:lanes",
     ]
     for key in bus_metadata:
-        if (key in metadata) and (metadata[key] in ["yes", "designated", "lane"]):
+        if (key in metadata) and (metadata[key]):
             metadata["bus"] = True
             break
         else:
@@ -634,12 +635,10 @@ def segment_shape_by_distance(
     # Path rectification using Douglas-Peucker algorithm
     gdf_segments = gpd.GeoDataFrame(geometry=output_linestrings, crs="EPSG:4326")
     gdf_segments = gdf_segments.to_crs("EPSG:3857")  # reproyectar a metros
-    print("Preparado para simplificar, segmentos:", len(gdf_segments))
     gdf_segments["geometry"] = gdf_segments.simplify(
         tolerance=4, preserve_topology=True
     )  # 4 metros de tolerancia
     gdf_segments = gdf_segments.to_crs("EPSG:4326")
-    print("Segmentos simplificados:", len(gdf_segments))
 
     # Add metadata to segments
     for col in shape.columns:
@@ -652,8 +651,7 @@ def segment_shape_by_distance(
 def save_segmented_shape_to_db(
     segmented_shape: List[shp_LineString], shape_name: str, lanes=None, bus=None
 ):
-    shape = Shape.objects.create(**{"name": shape_name})
-    print("Created shape:", shape_name, "adding segments:", len(segmented_shape))
+    shape = Shape.objects.create(**{"name": shape_name, "lanes": lanes, "bus": bus})
     for sequence, segment in enumerate(segmented_shape):
         shape.add_segment(sequence=sequence, geometry=segment)
 
@@ -664,19 +662,12 @@ def save_all_segmented_shapes_to_db(
     shape_name: str = None,
 ):
     if flush:
-        print("Flushing existing Shape and Segment objects from DB...")
         flush_shape_objects()
-        print("Flushed existing Shape and Segment objects from DB.")
     for idx, segmented_shape in enumerate(segmented_shapes):
         if shape_name is not None:
             shape_name_ = f"{shape_name}_{segmented_shape['direction_group'].iloc[0]}"
-        print("Segmented shape to save:", shape_name_)
         lanes = segmented_shape["lanes"].iloc[0] if "lanes" in segmented_shape else None
-        print("Lanes:", lanes)
         bus = segmented_shape["bus"].iloc[0] if "bus" in segmented_shape else None
-        print("Bus:", bus)
-
-        print("Saving segmented shape to DB:", shape_name_)
         save_segmented_shape_to_db(
             segmented_shape.geometry.tolist(),
             shape_name=shape_name_,
@@ -713,9 +704,10 @@ def process_osm_queries(distance_threshold: float = 500.0, use_fixtures: bool = 
 def process_shape_data(
     axis_name: str, axis: Dict, distance_threshold: float = 500.0, flush: bool = True
 ):
+    print(f"\nProcessing axis: {axis_name} with {len(axis['features'])} features...")
     # Extract features with valid geometry
     query_data = gpd.GeoDataFrame.from_features(axis, crs="EPSG:4326")
-    splitted_gdf = split_axis_by_direction(query_data, bearing_threshold=90.0)
+    splitted_gdf = split_axis_by_direction(query_data, bearing_threshold=100.0)
     segmented_shapes = []
     for i, group_gdf in enumerate(splitted_gdf):
         group_gdf["direction_group"] = i
@@ -725,13 +717,10 @@ def process_shape_data(
         one_road_gdf = keep_main_axis_lines(merged)
         conected_gdf = connect_lines(one_road_gdf, max_distance_m=500.0)
         filtered_gdf = filter_short_lines(conected_gdf)
-        print("Filtered lines:", len(filtered_gdf))
         target_bearing = group_gdf["bearing"].mean()  # o la media del grupo
-        print("Target bearing:", target_bearing)
         filtered_gdf["geometry"] = filtered_gdf.geometry.apply(
             lambda g: orient_linestring_by_bearing(g, target_bearing)
         )
-        print("Segmenting shape with distance threshold:", distance_threshold)
         segmented = segment_shape_by_distance(
             filtered_gdf, distance_threshold, distance_algorithm="haversine"
         )
