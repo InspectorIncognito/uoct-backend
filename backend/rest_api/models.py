@@ -15,6 +15,8 @@ from velocity.constants import DEG_PI, DEG_PI_HALF
 
 class Shape(models.Model):
     name = models.CharField(max_length=128)
+    lanes = models.IntegerField(null=True, blank=True)
+    bus = models.BooleanField(default=False)
     grid_min_lat = models.FloatField(default=DEG_PI_HALF)
     grid_max_lat = models.FloatField(default=-DEG_PI_HALF)
     grid_min_lon = models.FloatField(default=DEG_PI)
