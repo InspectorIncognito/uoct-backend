@@ -10,12 +10,10 @@ from jinja2 import Template
 OVERPASS_TEMPLATE = Template(
     """rel({{ relation_id }});
 map_to_area->.target_area;
-(
-{% for street in streets -%}
-  way(area.target_area)[highway~"primary|secondary"][name="{{ street }}"];
-{% endfor %}
-);
-out geom meta;"""
+way(area.target_area)
+  [highway~"^(primary|secondary)$"]
+  [name~"^({% for street in streets %}{{ street }}{% if not loop.last %}|{% endif %}{% endfor %})$"];
+"""
 )
 
 # Santiago's main traffic axes configuration
@@ -37,6 +35,26 @@ EJES_PRINCIPALES = {
             "Avenida Vicuña Mackenna Oriente",
         ],
     },
+    "Eje Gran Avenida": {
+        "city": "Provincia de Santiago",
+        "streets": ["Gran Avenida José Miguel Carrera", "San Diego", "Nataniel Cox"],
+    },
+    "Eje independencia": {
+        "city": "Provincia de Santiago",
+        "streets": ["Avenida Independencia"],
+    },
+    "Eje Santa Rosa": {
+        "city": "Provincia de Santiago",
+        "streets": ["Avenida Santa Rosa", "San Francisco"],
+    },
+    "Eje Irarrázaval": {
+        "city": "Provincia de Santiago",
+        "streets": [
+            "Avenida Irarrázaval",
+            "Avenida Larraín",
+            "Avenida Alcalde Fernando Castillo Velasco",
+        ],
+    },
     "Eje La Florida - Los Leones": {
         "city": "Provincia de Santiago",
         "streets": [
@@ -56,28 +74,9 @@ EJES_PRINCIPALES = {
             "Arica",
             "Avenida Almirante Blanco Encalada",
             "Avenida Tupper",
+            "Plaza Ercilla",
             "Avenida Manuel Antonio Matta",
             "Avenida Grecia",
-        ],
-    },
-    "Eje Gran Avenida": {
-        "city": "Provincia de Santiago",
-        "streets": ["Gran Avenida José Miguel Carrera", "San Diego", "Nataniel Cox"],
-    },
-    "Eje independencia": {
-        "city": "Provincia de Santiago",
-        "streets": ["Avenida Independencia"],
-    },
-    "Eje Santa Rosa": {
-        "city": "Provincia de Santiago",
-        "streets": ["Avenida Santa Rosa", "San Francisco"],
-    },
-    "Eje Irarrazabal": {
-        "city": "Provincia de Santiago",
-        "streets": [
-            "Avenida Irarrazabal",
-            "Avenida Larraín",
-            "Avenida Alcalde Fernando Castillo Velasco",
         ],
     },
 }
@@ -163,9 +162,7 @@ class OSMDownloader:
         except requests.RequestException as e:
             raise Exception(f"Error connecting to Nominatim API: {e}")
 
-    def build_overpass_query(
-        self, place: str, streets: List[str]
-    ) -> str:
+    def build_overpass_query(self, place: str, streets: List[str]) -> str:
         """Build an Overpass API query for a specific city, highway type, and list of streets.
 
         Parameters
@@ -185,15 +182,12 @@ class OSMDownloader:
         Exception
             If unable to build the query.
         """
-        print(f"Building Overpass query for {place}")
+        print(f"Building Overpass query ...")
 
         try:
             relation_id = self.get_relation_id(place)
-            print(f"Relation ID for {place}: {relation_id}")
 
-            return OVERPASS_TEMPLATE.render(
-                relation_id=relation_id, streets=streets
-            )
+            return OVERPASS_TEMPLATE.render(relation_id=relation_id, streets=streets)
 
         except Exception as e:
             print(f"Error building query: {e}")
@@ -221,7 +215,7 @@ class OSMDownloader:
         """
         for attempt in range(retries):
             try:
-                api = overpass.API(timeout=180)
+                api = overpass.API(timeout=180 * (attempt + 1))
                 # api.get adds [out:json]; at the beginning and "out geom;" at the end
                 response = api.get(query, verbosity="geom")
                 return geojson.loads(geojson.dumps(response))
