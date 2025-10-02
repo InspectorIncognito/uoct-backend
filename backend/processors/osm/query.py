@@ -39,13 +39,13 @@ EJES_PRINCIPALES = {
         "city": "Provincia de Santiago",
         "streets": ["Gran Avenida José Miguel Carrera", "San Diego", "Nataniel Cox"],
     },
-    "Eje independencia": {
-        "city": "Provincia de Santiago",
-        "streets": ["Avenida Independencia"],
-    },
     "Eje Santa Rosa": {
         "city": "Provincia de Santiago",
         "streets": ["Avenida Santa Rosa", "San Francisco"],
+    },
+    "Eje independencia": {
+        "city": "Provincia de Santiago",
+        "streets": ["Avenida Independencia"],
     },
     "Eje Irarrázaval": {
         "city": "Provincia de Santiago",
