@@ -182,7 +182,6 @@ class OSMDownloader:
         Exception
             If unable to build the query.
         """
-        print(f"Building Overpass query ...")
 
         try:
             relation_id = self.get_relation_id(place)

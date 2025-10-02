@@ -730,12 +730,12 @@ def process_shape_data(
             filtered_gdf, distance_threshold, distance_algorithm="haversine"
         )
         # Save segmented shapes to a geojson file for debugging
-        file_path = "debug"
-        if not os.path.exists(file_path):
-            os.makedirs(file_path)
-        segmented.to_file(
-            f"{file_path}/segmented_shape_{axis_name}_{i}.geojson", driver="GeoJSON"
-        )
+        # file_path = "debug"
+        # if not os.path.exists(file_path):
+        #    os.makedirs(file_path)
+        # segmented.to_file(
+        #    f"{file_path}/segmented_shape_{axis_name}_{i}.geojson", driver="GeoJSON"
+        # )
         segmented_shapes.append(segmented)
     print("Saving all segmented shapes to DB...")
     save_all_segmented_shapes_to_db(segmented_shapes, flush=flush, shape_name=axis_name)
