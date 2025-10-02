@@ -628,6 +628,15 @@ def segment_shape_by_distance(
     if len(segment) != 0:
         output_linestrings.append(shp_LineString(segment))
 
+    if len(output_linestrings) >= 2:
+        last_line = output_linestrings[-1]
+        prev_line = output_linestrings[-2]
+        if last_line.length < 0.75 * distance_threshold:
+            # Crear un nuevo LineString concatenando coordenadas
+            merged_coords = list(prev_line.coords) + list(last_line.coords)[1:]
+            output_linestrings[-2] = shp_LineString(merged_coords)
+            output_linestrings.pop(-1)
+
     # Path rectification using Douglas-Peucker algorithm
     gdf_segments = gpd.GeoDataFrame(geometry=output_linestrings, crs="EPSG:4326")
     gdf_segments = gdf_segments.to_crs("EPSG:3857")  # reproyectar a metros
