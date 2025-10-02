@@ -49,53 +49,55 @@ def split_axis_by_direction(
     if df.empty:
         return []
 
-    # Calculate bearings for all geometries
     df_with_bearings = df.copy()
     df_with_bearings["bearing"] = df_with_bearings.geometry.apply(calculate_bearing)
 
-    # Group by similar bearings
-    bearing_groups = {}
+    bearing_groups = []  # lista de {bearing: float, indices: [idx]}
 
     for idx, row in df_with_bearings.iterrows():
         bearing = row["bearing"]
         if bearing is None:
             continue
 
-        # Find the "oneway" tag safely
-        oneway = (
-            row["oneway"] if "oneway" in row and row["oneway"] is not None else "no"
-        )
-        # Handle nan values from pandas DataFrame, is is nan, convert to "no"
+        oneway = row.get("oneway", "no")
         if not isinstance(oneway, str):
             oneway = "no"
 
-        # Find existing group with similar bearing
         assigned = False
-        for group_bearing, group_indices in bearing_groups.items():
+        for group in bearing_groups:
+            group_bearing = group["bearing"]
             bearing_diff = min(
-                abs(bearing - group_bearing),
-                360
-                - abs(bearing - group_bearing),  # Handle wraparound (e.g., 350° vs 10°)
+                abs(bearing - group_bearing), 360 - abs(bearing - group_bearing)
             )
-
-            if oneway == "no" or oneway == "false" or oneway == "0":
-                group_indices.append(idx)
-                assigned = True
-
             if bearing_diff <= bearing_threshold:
-                if idx not in group_indices:
-                    group_indices.append(idx)
+                group["indices"].append(idx)
                 assigned = True
+                break
 
-        # Create new group if no similar bearing found
         if not assigned:
-            bearing_groups[bearing] = [idx]
+            bearing_groups.append({"bearing": bearing, "indices": [idx]})
 
-    # Create separate GeoDataFrames for each bearing group
+        # Si es bidireccional, lo duplicamos en el grupo opuesto (bearing+180°)
+        if oneway in ["no", "false", "0"]:
+            opposite_bearing = (bearing + 180) % 360
+            assigned = False
+            for group in bearing_groups:
+                group_bearing = group["bearing"]
+                bearing_diff = min(
+                    abs(opposite_bearing - group_bearing),
+                    360 - abs(opposite_bearing - group_bearing),
+                )
+                if bearing_diff <= bearing_threshold:
+                    group["indices"].append(idx)
+                    assigned = True
+                    break
+            if not assigned:
+                bearing_groups.append({"bearing": opposite_bearing, "indices": [idx]})
+
+    # Crear un GeoDataFrame por grupo
     result = []
-    for group_indices in bearing_groups.values():
-        group_df = df.loc[group_indices].copy()
-        group_df.set_crs(df.crs, allow_override=True, inplace=True)
+    for group in bearing_groups:
+        group_df = df.loc[group["indices"]].copy()
         group_df["bearing"] = group_df.geometry.apply(calculate_bearing)
         result.append(group_df)
 
@@ -103,40 +105,34 @@ def split_axis_by_direction(
 
 
 def calculate_bearing(geometry):
-    """Calculate the bearing of a LineString geometry.
-
-    Parameters
-    ----------
-    geometry : shapely.geometry.LineString
-        The geometry to calculate bearing for.
-
-    Returns
-    -------
-    float or None
-        Bearing in degrees (0-360), or None if calculation fails.
-    """
+    """Calcular el bearing ponderado de un LineString.
+    Usa todos los segmentos y pondera por la longitud.
+    Retorna bearing en grados (0-360)."""
     if not isinstance(geometry, shp_LineString) or len(geometry.coords) < 2:
         return None
 
-    # Get start and end points
-    start = geometry.coords[0]
-    end = geometry.coords[-1]
+    coords = list(geometry.coords)
+    sum_sin = 0.0
+    sum_cos = 0.0
+    total_len = 0.0
 
-    # Convert to radians
-    lat1, lon1 = math.radians(start[1]), math.radians(start[0])
-    lat2, lon2 = math.radians(end[1]), math.radians(end[0])
+    for (x1, y1), (x2, y2) in zip(coords[:-1], coords[1:]):
+        dx = x2 - x1
+        dy = y2 - y1
+        seg_len = math.hypot(dx, dy)
+        if seg_len == 0:
+            continue
+        # bearing con 0° = norte, positivo en el sentido horario
+        ang_rad = math.atan2(dx, dy)
+        sum_sin += seg_len * math.sin(ang_rad)
+        sum_cos += seg_len * math.cos(ang_rad)
+        total_len += seg_len
 
-    # Calculate bearing
-    dlon = lon2 - lon1
-    y = math.sin(dlon) * math.cos(lat2)
-    x = math.cos(lat1) * math.sin(lat2) - math.sin(lat1) * math.cos(lat2) * math.cos(
-        dlon
-    )
+    if total_len == 0:
+        return None
 
-    bearing = math.atan2(y, x)
-    bearing = math.degrees(bearing)
-    bearing = (bearing + 360) % 360  # Normalize to 0-360
-
+    mean_rad = math.atan2(sum_sin, sum_cos)
+    bearing = (math.degrees(mean_rad) + 360) % 360
     return round(bearing, 2)
 
 
@@ -707,7 +703,7 @@ def process_shape_data(
     print(f"\nProcessing axis: {axis_name} with {len(axis['features'])} features...")
     # Extract features with valid geometry
     query_data = gpd.GeoDataFrame.from_features(axis, crs="EPSG:4326")
-    splitted_gdf = split_axis_by_direction(query_data, bearing_threshold=100.0)
+    splitted_gdf = split_axis_by_direction(query_data, bearing_threshold=120.0)
     segmented_shapes = []
     for i, group_gdf in enumerate(splitted_gdf):
         group_gdf["direction_group"] = i
