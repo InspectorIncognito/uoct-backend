@@ -19,7 +19,7 @@ from processors.geometry.utils import (
 )
 from processors.osm.query import EJES_PRINCIPALES, OSMDownloader, get_axis_config
 from pyproj.crs import CRS
-from rest_api.models import Segment, Shape
+from rest_api.models import Axles, Segment, Shape
 from rest_api.util.shape import flush_shape_objects
 from shapely import Point, to_geojson
 from shapely.geometry import LineString as shp_LineString
@@ -688,20 +688,26 @@ def process_osm_queries(distance_threshold: float = 500.0, use_fixtures: bool = 
     """
     if use_fixtures:
         process_fixture_data(distance_threshold)
-    else:
-        osm_downloader = OSMDownloader()
-        for idx, query_name in enumerate(EJES_PRINCIPALES.keys()):
-            axis_config = get_axis_config(query_name)
+    osm_downloader = OSMDownloader()
+    axles_qs = Axles.objects.all().order_by("id")
+    if not axles_qs.exists():
+        print("No hay ejes (Axles) en la base. Ejecuta: python manage.py seed_axles")
+        return
+
+    for idx, axle in enumerate(axles_qs):
+        axis_config = {"city": axle.city, "streets": axle.streets}
+        try:
             query = osm_downloader.build_overpass_query(
                 place=axis_config["city"],
                 streets=axis_config["streets"],
             )
             axis = osm_downloader.execute_query(query)
-            if idx == 0:
-                flush = True
-            else:
-                flush = False
-            process_shape_data(query_name, axis, distance_threshold, flush=flush)
+        except Exception as e:
+            print(f"Error descargando eje '{axle.name}': {e}")
+            continue
+
+        flush = idx == 0
+        process_shape_data(axle.name, axis, distance_threshold, flush=flush)
 
 
 # Crea la consulta, separa los distintos shapes, los mergea y divide en segmentos de 'distance_threshold' metros."
