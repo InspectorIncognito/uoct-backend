@@ -2,24 +2,22 @@
 
 import codecs
 import csv
+import itertools
 import uuid
 import zipfile
-from geojson import LineString, Feature, FeatureCollection
-import pandas as pd
-import geopandas as gpd
-
-import requests
-import itertools
-from decouple import config
-from io import TextIOWrapper, BytesIO
+from io import BytesIO, TextIOWrapper
 from pathlib import Path
 from typing import IO
-from zipfile import ZipFile, BadZipFile, ZipExtFile
-from rest_api.util.segment import SegmentManager
-from rest_api.util.gtfs import flush_gtfs_shape_objects
+from zipfile import BadZipFile, ZipExtFile, ZipFile
 
-from velocity.constants import ENCODING, DELIMITER, QUOTECHAR
-from rest_api.util.gtfs import GTFSShape
+import geopandas as gpd
+import pandas as pd
+import requests
+from decouple import config
+from geojson import Feature, FeatureCollection, LineString
+from rest_api.util.gtfs import GTFSShape, flush_gtfs_shape_objects
+from rest_api.util.segment import SegmentManager
+from velocity.constants import DELIMITER, ENCODING, QUOTECHAR
 
 
 class GTFSFileReader:
@@ -28,7 +26,6 @@ class GTFSFileReader:
         self.gtfs_zip = gtfs_zip
 
     def __get_binary_csv_from_gtfs_zip(self, gtfs_zip: ZipFile) -> IO[bytes]:
-
         """
         Read the content in the GTFS zip object and return a binary extracted version of the desired csv file. This is
         used to read the csv file. See https://docs.python.org/3/library/zipfile.html#zipfile.ZipFile.open.
@@ -67,14 +64,19 @@ class ShapesReader(GTFSFileReader):
 
     @staticmethod
     def concat_points(group):
-        return [(lon, lat) for lat, lon in zip(group['shape_pt_lat'], group['shape_pt_lon'])]
+        return [
+            (lon, lat) for lat, lon in zip(group["shape_pt_lat"], group["shape_pt_lon"])
+        ]
 
     def process_df(self, df: pd.DataFrame) -> pd.DataFrame:
-        return df.groupby('shape_id')[['shape_pt_lat', 'shape_pt_lon']].apply(self.concat_points).reset_index(
-            name='coordinates')
+        return (
+            df.groupby("shape_id")[["shape_pt_lat", "shape_pt_lon"]]
+            .apply(self.concat_points)
+            .reset_index(name="coordinates")
+        )
 
     def filter_df(self, df: pd.DataFrame) -> pd.DataFrame:
-        str_filter = 'L|-'
+        str_filter = "L|-"
         return df[~df.shape_id.str.contains(str_filter, case=False)]
 
 
@@ -89,10 +91,10 @@ class TripsReader(GTFSFileReader):
 
     def get_route_direction(self, shape_id: str):
         df = self.load_csv_file_as_df()
-        col = df[df['shape_id'] == shape_id]
+        col = df[df["shape_id"] == shape_id]
         if col.empty:
             return None
-        return col.iloc[0]['direction_id']
+        return col.iloc[0]["direction_id"]
 
 
 class GTFSManager:
@@ -115,7 +117,7 @@ class GTFSManager:
         :rtype: bool
         """
         try:
-            with ZipFile(gtfs_zip, 'r') as zip_file:
+            with ZipFile(gtfs_zip, "r") as zip_file:
                 _ = zip_file.namelist()
                 return True
 
@@ -153,16 +155,20 @@ class GTFSManager:
     def save_gtfs_shapes_to_db(self, processed_df: pd.DataFrame):
         flush_gtfs_shape_objects()
         for _, row in processed_df.iterrows():
-            shape_id = row['shape_id']
-            geometry = row['coordinates']
+            shape_id = row["shape_id"]
+            geometry = row["coordinates"]
             direction = self.trips_reader.get_route_direction(shape_id)
             if direction is None:
                 print(f"Shape {shape_id} has no direction.")
                 continue
-            GTFSShape.objects.create(shape_id=shape_id, geometry=geometry, direction=direction)
+            GTFSShape.objects.create(
+                shape_id=shape_id, geometry=geometry, direction=direction
+            )
 
     # Stops
     def assign_stops_to_segments(self):
         stops_df = self.stops_reader.load_csv_file_as_df()
-        stops_df = stops_df[['stop_id', 'stop_lat', 'stop_lon']]
+        # Save df to a csv file for debugging
+        stops_df.to_csv("stops.csv", index=False)
+        stops_df = stops_df[["stop_id", "stop_lat", "stop_lon"]]
         self.segment_manager.assign_stops_for_each_segment(stops_df)
