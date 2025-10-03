@@ -4,7 +4,9 @@ from typing import Dict, List
 import geojson
 import overpass
 import requests
+from django.core.cache import cache
 from jinja2 import Template
+from rest_api.models import Axles
 
 # Overpass API template for querying OSM data
 OVERPASS_TEMPLATE = Template(
@@ -83,26 +85,23 @@ EJES_PRINCIPALES = {
 
 
 def get_axis_config(axis_name: str) -> dict:
-    """Get configuration for a specific axis.
-
-    Parameters
-    ----------
-    axis_name : str
-        Name of the axis
-
-    Returns
-    -------
-    dict
-        Configuration dictionary for the axis
-
-    Raises
-    ------
-    KeyError
-        If axis is not found
     """
-    if axis_name not in EJES_PRINCIPALES:
-        raise KeyError(f"Axis '{axis_name}' not found in configuration")
-    return EJES_PRINCIPALES[axis_name]
+    Obtiene la configuración (city, streets) de un eje desde la base de datos.
+    Usa cache simple. Lanza KeyError si no existe.
+    """
+    cache_key = f"axle_cfg:{axis_name}"
+    cached = cache.get(cache_key)
+    if cached:
+        return cached
+
+    try:
+        axle = Axles.objects.get(name=axis_name)
+    except Axles.DoesNotExist:
+        raise KeyError(f"Axis '{axis_name}' not found in database")
+
+    cfg = {"city": axle.city, "streets": axle.streets}
+    cache.set(cache_key, cfg, 300)
+    return cfg
 
 
 class OSMDownloader:
