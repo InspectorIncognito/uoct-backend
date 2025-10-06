@@ -25,4 +25,4 @@ REDIS_PORT=6379
 REDIS_DB=0
 
 PROTO_URL=https://transapp-prod-bucket.s3.us-east-2.amazonaws.com/routemanager/santiago_sonda.proto
-GTFS_URL=https://www.dtpm.cl/descargas/gtfs/GTFS-V122-PO20240427.zip
+GTFS_URL=https://www.dtpm.cl/descargas/gtfs/GTFS_20250802.zip
