@@ -278,7 +278,8 @@ class GTFSShape(models.Model):
 class GTFSRTTimestamp(SingletonModel):
     last_timestamp = models.CharField(default="", max_length=124)
 
+
 class Axles(models.Model):
     name = models.CharField(max_length=128)
     streets = ArrayField(models.CharField(max_length=128), blank=False, null=False)
-    city = models.CharField(max_length=128, default="Provincia de Santiago")
+    city = models.CharField(max_length=128, blank=True, default="Provincia de Santiago")

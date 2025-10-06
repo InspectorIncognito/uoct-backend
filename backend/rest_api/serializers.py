@@ -1,17 +1,28 @@
+from rest_api.models import (
+    Alert,
+    AlertThreshold,
+    Axles,
+    GTFSShape,
+    HistoricSpeed,
+    Segment,
+    Services,
+    Shape,
+    Speed,
+    Stop,
+)
 from rest_framework import serializers
-from rest_api.models import Shape, Segment, GTFSShape, Services, Speed, HistoricSpeed, Stop, AlertThreshold, Alert
 
 
 class ShapeSerializer(serializers.ModelSerializer):
     class Meta:
         model = Shape
-        fields = '__all__'
+        fields = "__all__"
 
 
 class SegmentSerializer(serializers.ModelSerializer):
     class Meta:
         model = Segment
-        fields = '__all__'
+        fields = "__all__"
 
 
 class SpeedSerializer(serializers.ModelSerializer):
@@ -20,7 +31,15 @@ class SpeedSerializer(serializers.ModelSerializer):
 
     class Meta:
         model = Speed
-        fields = ['shape', 'sequence', 'temporal_segment', 'day_type', 'distance', 'time_secs', 'timestamp']
+        fields = [
+            "shape",
+            "sequence",
+            "temporal_segment",
+            "day_type",
+            "distance",
+            "time_secs",
+            "timestamp",
+        ]
 
 
 class HistoricSpeedSerializer(serializers.ModelSerializer):
@@ -35,28 +54,56 @@ class HistoricSpeedSerializer(serializers.ModelSerializer):
 class StopSerializer(serializers.ModelSerializer):
     class Meta:
         model = Stop
-        fields = '__all__'
+        fields = "__all__"
 
 
 class ServicesSerializer(serializers.ModelSerializer):
     class Meta:
         model = Services
-        fields = '__all__'
+        fields = "__all__"
 
 
 class AlertSerializer(serializers.ModelSerializer):
     class Meta:
         model = Alert
-        fields = '__all__'
+        fields = "__all__"
 
 
 class GTFSShapeSerializer(serializers.ModelSerializer):
     class Meta:
         model = GTFSShape
-        fields = ['shape_id', 'direction']
+        fields = ["shape_id", "direction"]
 
 
 class AlertThresholdSerializer(serializers.ModelSerializer):
     class Meta:
         model = AlertThreshold
-        fields = '__all__'
+        fields = "__all__"
+
+
+class AxlesSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = Axles
+        fields = ["id", "name", "streets", "city"]
+
+    def validate_name(self, value):
+        if not value or not value.strip():
+            raise serializers.ValidationError("El nombre no puede estar vacío.")
+        # verificar que no exista otro con el mismo nombre (ignorando mayúsculas/minúsculas)
+        qs = Axles.objects.filter(name__iexact=value.strip())
+        if qs.exists():
+            raise serializers.ValidationError("Ya existe un eje con ese nombre.")
+        return value.strip()
+
+    def validate_streets(self, value):
+        if not value or not isinstance(value, list):
+            raise serializers.ValidationError("Debe incluir al menos una calle.")
+        # Opcional: eliminar duplicados conservando orden
+        clean = []
+        for s in value:
+            s_norm = s.strip()
+            if s_norm and s_norm not in clean:
+                clean.append(s_norm)
+        if not clean:
+            raise serializers.ValidationError("Debe ingresar calles válidas.")
+        return clean
