@@ -283,3 +283,9 @@ class Axles(models.Model):
     name = models.CharField(max_length=128)
     streets = ArrayField(models.CharField(max_length=128), blank=False, null=False)
     city = models.CharField(max_length=128, blank=True, default="Provincia de Santiago")
+
+
+class TrafficSignal(models.Model):
+    signal_id = models.CharField(max_length=128)
+    latitude = models.FloatField()
+    longitude = models.FloatField()
