@@ -17,7 +17,7 @@ from processors.geometry.utils import (
     interpolate_points_by_distance,
     linestring_distance,
 )
-from processors.osm.query import EJES_PRINCIPALES, OSMDownloader, get_axis_config
+from processors.osm.query import VESPUCIO_OVERPASS_QUERY, OSMDownloader
 from pyproj.crs import CRS
 from rest_api.models import Axles, Segment, Shape
 from rest_api.util.shape import flush_shape_objects
@@ -697,10 +697,13 @@ def process_osm_queries(distance_threshold: float = 500.0, use_fixtures: bool = 
     for idx, axle in enumerate(axles_qs):
         axis_config = {"city": axle.city, "streets": axle.streets}
         try:
-            query = osm_downloader.build_overpass_query(
-                place=axis_config["city"],
-                streets=axis_config["streets"],
-            )
+            if axle.name == "Eje Américo Vespucio":
+                query = VESPUCIO_OVERPASS_QUERY
+            else:
+                query = osm_downloader.build_overpass_query(
+                    place=axis_config["city"],
+                    streets=axis_config["streets"],
+                )
             axis = osm_downloader.execute_query(query)
         except Exception as e:
             print(f"Error descargando eje '{axle.name}': {e}")
@@ -718,7 +721,7 @@ def process_shape_data(
     print(f"\nProcessing axis: {axis_name} with {len(axis['features'])} features...")
     # Extract features with valid geometry
     query_data = gpd.GeoDataFrame.from_features(axis, crs="EPSG:4326")
-    splitted_gdf = split_axis_by_direction(query_data, bearing_threshold=120.0)
+    splitted_gdf = split_axis_by_direction(query_data, bearing_threshold=100.0)
     segmented_shapes = []
     for i, group_gdf in enumerate(splitted_gdf):
         group_gdf["direction_group"] = i
@@ -726,7 +729,7 @@ def process_shape_data(
         group_gdf["eje_name"] = axis_name
         merged = merge_lines_with_metadata(group_gdf)
         one_road_gdf = keep_main_axis_lines(merged)
-        conected_gdf = connect_lines(one_road_gdf, max_distance_m=500.0)
+        conected_gdf = connect_lines(one_road_gdf, max_distance_m=515.0)
         filtered_gdf = filter_short_lines(conected_gdf)
         target_bearing = group_gdf["bearing"].mean()  # o la media del grupo
         filtered_gdf["geometry"] = filtered_gdf.geometry.apply(
@@ -736,12 +739,12 @@ def process_shape_data(
             filtered_gdf, distance_threshold, distance_algorithm="haversine"
         )
         # Save segmented shapes to a geojson file for debugging
-        # file_path = "debug"
-        # if not os.path.exists(file_path):
-        #    os.makedirs(file_path)
-        # segmented.to_file(
-        #    f"{file_path}/segmented_shape_{axis_name}_{i}.geojson", driver="GeoJSON"
-        # )
+        file_path = "debug"
+        if not os.path.exists(file_path):
+            os.makedirs(file_path)
+        segmented.to_file(
+            f"{file_path}/segmented_shape_{axis_name}_{i}.geojson", driver="GeoJSON"
+        )
         segmented_shapes.append(segmented)
     print("Saving all segmented shapes to DB...")
     save_all_segmented_shapes_to_db(segmented_shapes, flush=flush, shape_name=axis_name)

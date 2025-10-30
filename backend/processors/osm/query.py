@@ -81,7 +81,24 @@ EJES_PRINCIPALES = {
             "Avenida Grecia",
         ],
     },
+    "Eje Américo Vespucio": {
+        "city": "Provincia de Santiago",
+        "streets": [
+            "Avenida Américo Vespucio",
+            "Avenida Ossa",
+            "Periodista José Carrasco Tapia",
+        ],
+    },
+    "Eje Recoleta": {
+        "city": "Provincia de Santiago",
+        "streets": [
+            "Avenida Recoleta",
+        ],
+    },
 }
+
+VESPUCIO_OVERPASS_QUERY = """rel(6582778);
+way(r);"""
 
 
 def get_axis_config(axis_name: str) -> dict:
