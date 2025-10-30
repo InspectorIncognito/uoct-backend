@@ -20,6 +20,7 @@ from rest_api.models import (
     Shape,
     Speed,
     Stop,
+    TrafficSignal,
 )
 from rest_api.serializers import (
     AlertSerializer,
@@ -32,6 +33,7 @@ from rest_api.serializers import (
     ShapeSerializer,
     SpeedSerializer,
     StopSerializer,
+    TrafficSignalSerializer,
 )
 from rest_framework import generics, mixins, viewsets
 from rest_framework.permissions import AllowAny
@@ -337,3 +339,9 @@ class AxlesViewSet(viewsets.ModelViewSet):
     queryset = Axles.objects.all().order_by("id")
     serializer_class = AxlesSerializer
     permission_classes = [AllowAny]
+
+
+class TrafficSignalViewSet(viewsets.ModelViewSet):
+    permission_classes = [AllowAny]
+    serializer_class = TrafficSignalSerializer
+    queryset = TrafficSignal.objects.all()

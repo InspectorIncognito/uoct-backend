@@ -9,6 +9,7 @@ from rest_api.models import (
     Shape,
     Speed,
     Stop,
+    TrafficSignal,
 )
 from rest_framework import serializers
 
@@ -107,3 +108,8 @@ class AxlesSerializer(serializers.ModelSerializer):
         if not clean:
             raise serializers.ValidationError("Debe ingresar calles válidas.")
         return clean
+
+class TrafficSignalSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = TrafficSignal
+        fields = "__all__"
