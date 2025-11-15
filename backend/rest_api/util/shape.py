@@ -1,8 +1,19 @@
-from rest_api.models import Shape, Segment
-from velocity.constants import DEG_PI, DEG_PI_HALF
 from typing import Dict, List
-from geojson import FeatureCollection, Feature, LineString
+
 import geopandas as gpd
+from geojson import Feature, FeatureCollection, LineString
+from rest_api.models import (
+    Alert,
+    HistoricSpeed,
+    Segment,
+    Services,
+    Shape,
+    Speed,
+    Stop,
+    TrafficSignal,
+)
+from shapely.geometry import LineString as shp_LineString
+from velocity.constants import DEG_PI, DEG_PI_HALF
 
 
 class ShapeManager:
@@ -25,6 +36,16 @@ class ShapeManager:
     def get_segments(self) -> Dict[int, List[Segment]]:
         return {shape.pk: list(shape.get_segments()) for shape in self.shapes}
 
+    def get_segments_gdf(self):
+        """Return a dictionary of GeoDataFrames, one per shape, containing its segments."""
+        segments_dict: Dict[int, gpd.GeoDataFrame] = {}
+        for shape in self.shapes:
+            name = shape.name
+            axis_name = name.rsplit("_", 1)[0]
+            segments_gdf = shape.get_segments_gdf()
+            segments_dict[axis_name] = segments_gdf
+        return segments_dict
+
     def get_distances(self):
         shape_dict = {}
         for shape in self.shapes:
@@ -33,9 +54,7 @@ class ShapeManager:
 
     def to_geojson(self):
         return FeatureCollection(
-            features=[
-                feature.to_geojson() for feature in self.shapes
-            ]
+            features=[feature.to_geojson() for feature in self.shapes]
         )
 
     def get_all_services(self):
@@ -43,7 +62,11 @@ class ShapeManager:
         for shape in self.shapes:
             segments = shape.get_segments()
             for segment in segments:
-                services.update(segment.get_services())
+                seg_services = segment.get_services()
+                if seg_services is None:
+                    # Simplemente lo ignoramos
+                    continue
+                services.update(seg_services)
         return services
 
     def get_buffered_shape(self):
@@ -54,10 +77,32 @@ class ShapeManager:
                 geometry = segment.geometry
                 features.append(Feature(geometry=LineString(coordinates=geometry)))
         gdf = gpd.GeoDataFrame.from_features(features)
-        gdf['geometry'] = gdf['geometry'].buffer(distance=0.0005, cap_style='flat')
+        gdf["geometry"] = gdf["geometry"].buffer(distance=0.0005, cap_style="flat")
         polygon_gdf = gdf.union_all()
         return polygon_gdf
 
 
 def flush_shape_objects():
-    Shape.objects.all().delete()
+    """Safely clear all shape-related data in dependency order to avoid FK type issues.
+
+    Deletes dependent records first (Speed, HistoricSpeed, Alert, Services, Stop,
+    TrafficSignal), then Segments, and finally Shapes. This avoids DB errors when
+    FK column types differ (e.g., bigint vs uuid) during ON DELETE CASCADE.
+    """
+    try:
+        # Delete dependents referencing Segment first
+        Speed.objects.all().delete()
+        HistoricSpeed.objects.all().delete()
+        Alert.objects.all().delete()
+        Services.objects.all().delete()
+        Stop.objects.all().delete()
+        TrafficSignal.objects.all().delete()
+
+        # Then delete segments and shapes
+        Segment.objects.all().delete()
+        Shape.objects.all().delete()
+        print(
+            "Flushed shapes and related objects (segments, speeds, alerts, services, stops, signals)"
+        )
+    except Exception as e:
+        print(f"Error flushing shape-related objects: {e}")
