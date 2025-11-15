@@ -17,6 +17,7 @@ from decouple import config
 from geojson import Feature, FeatureCollection, LineString
 from rest_api.util.gtfs import GTFSShape, flush_gtfs_shape_objects
 from rest_api.util.segment import SegmentManager
+from shapely.geometry import LineString as shp_LineString
 from velocity.constants import DELIMITER, ENCODING, QUOTECHAR
 
 
@@ -97,6 +98,26 @@ class TripsReader(GTFSFileReader):
         return col.iloc[0]["direction_id"]
 
 
+class RoutesReader(GTFSFileReader):
+    def __init__(self, gtfs_zip):
+        super().__init__(filename="routes.txt", gtfs_zip=gtfs_zip)
+
+    def filter_bus_routes(self, df: pd.DataFrame = None) -> pd.DataFrame:
+        """
+        Filter routes to include only buses (route_type == 3).
+
+        Args:
+            df: Optional DataFrame to use. If None, loads from CSV
+
+        Returns:
+            DataFrame with only bus routes
+        """
+        if df is None:
+            df = self.load_csv_file_as_df()
+
+        return df[df["route_type"] == 3].reset_index(drop=True)
+
+
 class GTFSManager:
     def __init__(self):
         self.gtfs_url = config("GTFS_URL")
@@ -105,6 +126,7 @@ class GTFSManager:
         self.shapes_reader = ShapesReader(self.gtfs_zip)
         self.stops_reader = StopsReader(self.gtfs_zip)
         self.trips_reader = TripsReader(self.gtfs_zip)
+        self.routes_reader = RoutesReader(self.gtfs_zip)
 
         self.segment_manager = SegmentManager()
 
@@ -152,22 +174,91 @@ class GTFSManager:
         df = self.shapes_reader.filter_df(df)
         return df
 
+    def merge_gtfs_data(self):
+        """
+        Merge trips, routes, and shapes DataFrames exactly as done in join_gtfs_info.py
+
+        Returns:
+            Merged DataFrame with trips, routes, and shapes data
+        """
+        # Load dataframes
+        shapes_df = self.shapes_reader.load_csv_file_as_df()
+        trips_df = self.trips_reader.load_csv_file_as_df()
+        routes_df = self.routes_reader.load_csv_file_as_df()
+
+        # Drop columns exactly as in join_gtfs_info.py
+        drop_columns_shapes = []
+        drop_columns_trips = [
+            "trip_id",
+            "service_id",
+            "trip_headsign",
+            "wheelchair_accessible",
+            "bikes_allowed",
+        ]
+        drop_columns_routes = [
+            "agency_id",
+            "route_short_name",
+            "route_long_name",
+            "route_desc",
+            "route_url",
+            "route_color",
+            "route_text_color",
+        ]
+
+        shapes_df.drop(columns=drop_columns_shapes, inplace=True)
+        trips_df.drop(columns=drop_columns_trips, inplace=True)
+        routes_df.drop(columns=drop_columns_routes, inplace=True)
+
+        # Process shapes
+        shapes_df = self.shapes_reader.process_df(shapes_df)
+        # Remove duplicates from trips
+        trips_df = trips_df.drop_duplicates(
+            subset=["shape_id", "route_id", "direction_id"]
+        )
+        # Merge DataFrames
+        merged_df = trips_df.merge(routes_df, on="route_id").merge(
+            shapes_df, on="shape_id"
+        )
+
+        return merged_df
+
+    def get_processed_shapes(self):
+        """
+        Create the final DataFrames for shapes (only bus routes) from the merged GTFS data.
+        """
+        merged_df = self.merge_gtfs_data()
+
+        # Filter only bus routes (route_type == 3)
+        shapes_df = (
+            merged_df[merged_df["route_type"] == 3]
+            .drop(columns=["route_type"])
+            .reset_index(drop=True)
+        )
+
+        return shapes_df
+
     def save_gtfs_shapes_to_db(self, processed_df: pd.DataFrame):
         flush_gtfs_shape_objects()
         for _, row in processed_df.iterrows():
             shape_id = row["shape_id"]
+            route_id = row.get("route_id", None)
             geometry = row["coordinates"]
-            direction = self.trips_reader.get_route_direction(shape_id)
+            direction = row.get("direction_id", None)
             if direction is None:
                 print(f"Shape {shape_id} has no direction.")
                 continue
             GTFSShape.objects.create(
-                shape_id=shape_id, geometry=geometry, direction=direction
+                shape_id=shape_id,
+                route_id=route_id,
+                geometry=geometry,
+                direction=direction,
             )
 
     # Stops
     def assign_stops_to_segments(self):
         stops_df = self.stops_reader.load_csv_file_as_df()
+        stops_df = stops_df.drop(columns=["stop_code", "location_type"])
+
         # Save df to a csv file for debugging
         stops_df.to_csv("stops.csv", index=False)
         stops_df = stops_df[["stop_id", "stop_lat", "stop_lon"]]

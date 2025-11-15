@@ -25,11 +25,21 @@ def get_temporal_segment(date: datetime, interval: int = 15):
 
 
 def get_temporal_range(temporal_segment):
-    start_time_minutes = temporal_segment * 15
-    hours = start_time_minutes // 60
-    minutes = start_time_minutes % 60
+    # Base: ahora en UTC
+    now_utc = timezone.now()
 
-    start_time = timezone.localtime().replace(hour=hours, minute=minutes, second=0, microsecond=0)
+    start_minutes = temporal_segment * 15
+    start_hour = start_minutes // 60
+    start_minute = start_minutes % 60
+
+    # Construir un datetime en UTC, conservando la fecha actual
+    start_time = now_utc.replace(
+        hour=start_hour,
+        minute=start_minute,
+        second=0,
+        microsecond=0
+    )
+
     end_time = start_time + timedelta(minutes=15)
     return start_time, end_time
 

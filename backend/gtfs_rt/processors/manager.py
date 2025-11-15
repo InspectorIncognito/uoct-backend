@@ -1,12 +1,13 @@
+import datetime
 import sched
 import time
-import datetime
+from datetime import UTC
+
 import requests
 from django.utils import timezone
-from gtfs_rt.models import GPSPulse
-from gtfs_rt.config import PROTO_URL
 from google.transit import gtfs_realtime_pb2
-
+from gtfs_rt.config import PROTO_URL, TIMEZONE
+from gtfs_rt.models import GPSPulse
 from rest_api.models import GTFSRTTimestamp
 
 
@@ -14,7 +15,7 @@ class GTFSRTManager:
     def __init__(self, gtfs_rt_url=PROTO_URL):
         self.url = gtfs_rt_url
         self.start_datetime = timezone.localtime()
-        self.previous_timestamp = '0'
+        self.previous_timestamp = "0"
         self.until_datetime = timezone.localtime()
 
     def __update_until_datetime(self, hours):
@@ -49,28 +50,33 @@ class GTFSRTManager:
             manager = GTFSRTTimestamp.objects.first()
             last_timestamp = manager.last_timestamp
             if current_timestamp <= last_timestamp:
-                print('Ignoring duplicated GTFS-RT')
+                print("Ignoring duplicated GTFS-RT")
                 return
             else:
                 manager.last_timestamp = current_timestamp
                 manager.save()
 
         for entity in feed.entity:
-            if entity.HasField('vehicle'):
-                if entity.vehicle.HasField('trip') and entity.vehicle.HasField('vehicle'):
-                    timestamp = entity.vehicle.timestamp
-                    route_id = entity.vehicle.trip.route_id
-                    direction_id = entity.vehicle.trip.direction_id
-                    license_plate = entity.vehicle.vehicle.license_plate
-                    gps = entity.vehicle.position
-                    GPSPulse.objects.create(
-                        route_id=route_id,
-                        direction_id=direction_id,
-                        latitude=gps.latitude,
-                        longitude=gps.longitude,
-                        license_plate=license_plate,
-                        timestamp=datetime.datetime.fromtimestamp(timestamp).astimezone(timezone.get_current_timezone())
-                    )
+            if entity.HasField("vehicle"):
+                v = entity.vehicle
+                if v.HasField("vehicle"):
+                    if v.HasField("trip") and v.HasField("vehicle"):
+                        timestamp = v.timestamp
+                        route_id = v.trip.route_id
+                        direction = v.trip.direction_id
+                        license_plate = v.vehicle.license_plate
+                        gps = v.position
+                        GPSPulse.objects.create(
+                            route_id=route_id,
+                            direction=direction,
+                            latitude=gps.latitude,
+                            longitude=gps.longitude,
+                            bearing=gps.bearing,
+                            license_plate=license_plate,
+                            timestamp=datetime.datetime.fromtimestamp(
+                                timestamp
+                            ).astimezone(timezone.get_current_timezone()),
+                        )
 
     def run_process(self):
         raw_data = self.download_raw_gtfs_rt_data()
@@ -91,7 +97,7 @@ class GTFSRTManager:
         self.run_process()
         scheduler.enter(60, 1, self.process_schedule, (scheduler,))
 
-    def run_process_scheduler(self, hours: int = 1):
+    def run_process_scheduler(self, hours: float = 1):
         self.__update_until_datetime(hours)
         print(f"Downloading GTFS RT data until {self.until_datetime.time()}")
 

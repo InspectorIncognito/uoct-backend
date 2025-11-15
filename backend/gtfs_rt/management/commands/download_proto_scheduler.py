@@ -11,12 +11,12 @@ class Command(BaseCommand):
         parser.add_argument(
             '--hours',
             help="Sets the time limit for downloading GTFS RT proto data (format: HH:MM:SS).",
-            type=int
+            type=float
         )
 
     def handle(self, *args, **options):
         print("Running download_proto_scheduler")
-        default_hours = None  # forever
+        default_hours = None  # 1 hour default
         if options['hours']:
             default_hours = options['hours']
         gtfs_rt_manager = GTFSRTManager()

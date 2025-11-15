@@ -1,6 +1,6 @@
-from django.core.management.base import BaseCommand
 import datetime
 
+from django.core.management.base import BaseCommand
 from gtfs_rt.config import TIMEZONE
 from gtfs_rt.models import GPSPulse
 
@@ -21,10 +21,10 @@ class Command(BaseCommand):
                 "hour": timestamp.hour,
                 "minute": timestamp.minute,
                 "second": timestamp.second,
-                "microsecond": timestamp.microsecond
+                "microsecond": timestamp.microsecond,
             }
             new_timestamp = datetime.datetime(**timestamp_data)
-            new_timestamp = timezone.localize(new_timestamp)
+            new_timestamp = new_timestamp.replace(tzinfo=timezone)
             gps_pulse.timestamp = new_timestamp
             gps_pulse.save()
         print("DONE")
