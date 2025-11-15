@@ -1,11 +1,10 @@
-from rest_framework import routers
+from django.urls import include, path
 from gtfs_rt.views import GTFSRTViewSet
-from django.urls import path, include
+from rest_framework import routers
 
 router = routers.SimpleRouter()
-router.register(r'pulses', GTFSRTViewSet)
+router.register(r"pulses", GTFSRTViewSet, basename="pulses")
 
 urlpatterns = [
-    path('', include((router.urls, 'gtfs_rt'), namespace='gtfs_rt')),
-    path('to_geojson/', GTFSRTViewSet.as_view({'get': 'to_geojson'}), name='GTFSRT_to_geojson')
+    path("", include(router.urls)),
 ]

@@ -1,5 +1,6 @@
 import uuid
 
+import geopandas as gpd
 from django.contrib.postgres.fields import ArrayField
 from django.db import models
 from django.utils import timezone
@@ -15,8 +16,6 @@ from velocity.constants import DEG_PI, DEG_PI_HALF
 
 class Shape(models.Model):
     name = models.CharField(max_length=128)
-    lanes = models.IntegerField(null=True, blank=True)
-    bus = models.BooleanField(default=False)
     grid_min_lat = models.FloatField(default=DEG_PI_HALF)
     grid_max_lat = models.FloatField(default=-DEG_PI_HALF)
     grid_min_lon = models.FloatField(default=DEG_PI)
@@ -25,9 +24,43 @@ class Shape(models.Model):
     def get_segments(self):
         return Segment.objects.filter(shape=self).order_by("sequence")
 
-    def add_segment(self, sequence: int, geometry: shp_LineString) -> None:
+    def get_segments_gdf(self):
+
+        segments = self.get_segments()
+        if len(segments) == 0:
+            return gpd.GeoDataFrame()
+
+        data = []
+        for segment in segments:
+            line = shp_LineString(coordinates=segment.geometry)
+            data.append(
+                {
+                    "shape_id": self.name,
+                    "segment_id": segment.segment_id,
+                    "direction": segment.direction,
+                    "bearing": segment.bearing,
+                    "sequence": segment.sequence,
+                    "geometry": line,
+                }
+            )
+        gdf = gpd.GeoDataFrame(data, geometry="geometry", crs="EPSG:4326")
+        return gdf
+
+    def add_segment(
+        self,
+        sequence: int,
+        geometry: shp_LineString,
+        bearing: float = None,
+        direction: int = None,
+    ) -> None:
         points = list(geometry.coords)
-        shape_data = {"shape": self, "sequence": sequence, "geometry": points}
+        shape_data = {
+            "shape": self,
+            "sequence": sequence,
+            "geometry": points,
+            "bearing": bearing,
+            "direction": direction,
+        }
         for point in points:
             self.grid_min_lat = min(self.grid_min_lat, point[1])
             self.grid_max_lat = max(self.grid_max_lat, point[1])
@@ -71,8 +104,10 @@ class Shape(models.Model):
 
 
 class Segment(models.Model):
-    segment_id = models.UUIDField(unique=True, default=uuid.uuid4)
+    segment_id = models.UUIDField(primary_key=True, unique=True, default=uuid.uuid4)
     shape = models.ForeignKey(Shape, on_delete=models.CASCADE)
+    bearing = models.FloatField(null=True, blank=True)
+    direction = models.IntegerField(null=True, blank=True)
     sequence = models.IntegerField(blank=False, null=False)
     geometry = ArrayField(ArrayField(models.FloatField()), blank=False, null=False)
 
@@ -145,7 +180,8 @@ class Segment(models.Model):
         return [stop.stop_id for stop in stops_query]
 
     def get_services(self):
-        return Services.objects.get(segment=self).services
+        services_obj = Services.objects.filter(segment=self).first()
+        return services_obj.services if services_obj else None
 
 
 class Stop(models.Model):
@@ -257,11 +293,12 @@ class Alert(models.Model):
 
 class Services(models.Model):
     segment = models.ForeignKey(Segment, on_delete=models.CASCADE)
-    services = ArrayField(models.CharField(max_length=124), blank=False, null=False)
+    services = ArrayField(models.CharField(max_length=124))
 
 
 class GTFSShape(models.Model):
-    shape_id = models.CharField(max_length=124)
+    shape_id = models.CharField(primary_key=True, max_length=124)
+    route_id = models.CharField(max_length=124)
     geometry = ArrayField(ArrayField(models.FloatField()), blank=False, null=False)
     direction = models.IntegerField(blank=False, null=False)
 
@@ -270,6 +307,7 @@ class GTFSShape(models.Model):
             geometry=LineString(coordinates=self.geometry),
             properties={
                 "shape_id": str(self.shape_id),
+                "route_id": str(self.route_id),
                 "direction": str(self.direction),
             },
         )

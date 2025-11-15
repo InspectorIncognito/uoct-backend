@@ -73,7 +73,7 @@ class AlertSerializer(serializers.ModelSerializer):
 class GTFSShapeSerializer(serializers.ModelSerializer):
     class Meta:
         model = GTFSShape
-        fields = ["shape_id", "direction"]
+        fields = ["shape_id", "route_id", "direction"]
 
 
 class AlertThresholdSerializer(serializers.ModelSerializer):
@@ -108,6 +108,7 @@ class AxlesSerializer(serializers.ModelSerializer):
         if not clean:
             raise serializers.ValidationError("Debe ingresar calles válidas.")
         return clean
+
 
 class TrafficSignalSerializer(serializers.ModelSerializer):
     class Meta:

@@ -11,6 +11,7 @@ from gtfs_rt.serializers import GTFSRTSerializer
 from gtfs_rt.utils import get_temporal_range, get_temporal_segment
 from rest_api.util.shape import ShapeManager
 from rest_framework import viewsets
+from rest_framework.decorators import action
 from rest_framework.permissions import AllowAny
 
 
@@ -28,17 +29,17 @@ class GTFSRTViewSet(viewsets.ModelViewSet):
         start_date = self.request.query_params.get("start_date")
         end_date = self.request.query_params.get("end_date")
         if start_date and end_date:
-            start_date = datetime.strptime(start_date, "%Y-%m-%dT%H:%M:%SZ").astimezone(
-                TIMEZONE
+            start_date = datetime.strptime(start_date, "%Y-%m-%dT%H:%M:%SZ").replace(
+                tzinfo=timezone.utc
             )
-            end_date = datetime.strptime(end_date, "%Y-%m-%dT%H:%M:%SZ").astimezone(
-                TIMEZONE
+            end_date = datetime.strptime(end_date, "%Y-%m-%dT%H:%M:%SZ").replace(
+                tzinfo=timezone.utc
             )
             queryset = queryset.filter(
                 timestamp__gte=start_date, timestamp__lte=end_date
             ).order_by("route_id")
         else:
-            now = timezone.localtime()
+            now = timezone.now()
             previous_15_minutes = now - delta_time
             previous_temporal_segment = get_temporal_segment(previous_15_minutes)
             start_date, end_date = get_temporal_range(previous_temporal_segment)
@@ -47,35 +48,19 @@ class GTFSRTViewSet(viewsets.ModelViewSet):
                 timestamp__gte=start_date, timestamp__lte=end_date
             ).order_by("route_id")
         print("initial gps points:", queryset.count())
-        queryset = queryset.annotate(
-            service_id=Concat(
-                F("route_id"),
-                Case(
-                    When(direction_id=0, then=Value("I")),
-                    When(direction_id=1, then=Value("R")),
-                    output_field=CharField(),
-                ),
-                output_field=CharField(),
-            )
-        )
+        queryset = queryset.annotate(service_id=F("route_id"))
         shape_manager = ShapeManager()
         all_services = shape_manager.get_all_services()
+        print("all_services:", len(all_services))
+        print(all_services)
         queryset = queryset.filter(service_id__in=all_services)
+        print("filtered gps points:", queryset.count())
         return queryset
 
+    @action(detail=False, methods=["get"])
     def to_geojson(self, request):
-        shape_manager = ShapeManager()
-        all_services = list(shape_manager.get_all_services())
-
-        # queryset = (self.get_queryset()
-        #            .values('route_id', 'latitude', 'longitude')
-        #            .annotate(service=Concat(F('route_id'), Value("I") if F('direction') else Value("R"),
-        #                                     output_field=CharField()))
-        #            .order_by('route_id')
-        #            )
-        # queryset = queryset.filter(service__in=all_services)
         queryset = self.get_queryset()
-        print(queryset.count())
+        print(f"queryset count: {queryset.count()}")
         geojson_data = []
         for gps in queryset:
             gps_geojson = Feature(
