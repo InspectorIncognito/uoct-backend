@@ -45,7 +45,7 @@ EJES_PRINCIPALES = {
         "city": "Provincia de Santiago",
         "streets": ["Avenida Santa Rosa", "San Francisco"],
     },
-    "Eje independencia": {
+    "Eje Independencia": {
         "city": "Provincia de Santiago",
         "streets": ["Avenida Independencia"],
     },
@@ -81,12 +81,25 @@ EJES_PRINCIPALES = {
             "Avenida Grecia",
         ],
     },
-    "Eje Américo Vespucio": {
+    "Eje Américo Vespucio Norte": {
         "city": "Provincia de Santiago",
         "streets": [
-            "Avenida Américo Vespucio",
+            "Autopista Vespucio Norte",
+            "Avenida Vespucio Norte",
+        ],
+    },
+    "Eje Américo Vespucio Sur": {
+        "city": "Provincia de Santiago",
+        "streets": [
+            "Autopista Vespucio Sur",
+            "Avenida Vespucio Sur",
+        ],
+    },
+    "Eje Américo Vespucio Oriente": {
+        "city": "Provincia de Santiago",
+        "streets": [
+            "Autopista Vespucio Oriente",
             "Avenida Ossa",
-            "Periodista José Carrasco Tapia",
         ],
     },
     "Eje Recoleta": {
@@ -97,8 +110,18 @@ EJES_PRINCIPALES = {
     },
 }
 
-VESPUCIO_OVERPASS_QUERY = """rel(6582778);
-way(r);"""
+VESPUCIO_NORTE_OVERPASS_QUERY = """relation(6582778);
+way(r)
+  [highway~"^(motorway)$"]
+  [name~"Autopista Vespucio Norte"];"""
+VESPUCIO_SUR_OVERPASS_QUERY = """relation(6582778);
+way(r)
+  [highway~"^(motorway)$"]
+  [name~"Autopista Vespucio Sur"];"""
+VESPUCIO_ORIENTE_OVERPASS_QUERY = """relation(6582778);
+way(r)
+  [highway~"^(motorway|primary)"]
+  [name~"(Autopista Vespucio Oriente|Avenida Ossa)"];"""
 
 
 def get_axis_config(axis_name: str) -> dict:
@@ -208,7 +231,7 @@ class OSMDownloader:
             print(f"Error building query: {e}")
             raise
 
-    def execute_query(self, query: str, retries: int = 3) -> Dict:
+    def execute_query(self, query: str, retries: int = 5) -> Dict:
         """Execute an Overpass API query and return the results.
 
         Parameters
@@ -238,8 +261,8 @@ class OSMDownloader:
             except Exception as e:
                 print(f"Attempt {attempt + 1} failed: {e}")
                 if attempt < retries - 1:
-                    print(f"Retrying in 5 seconds...")
-                    time.sleep(5)
+                    print(f"Retrying in {5 * (attempt + 1)} seconds...")
+                    time.sleep(5 * (attempt + 1))
                 else:
                     print("All retry attempts failed.")
                     raise

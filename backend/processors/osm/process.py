@@ -17,7 +17,12 @@ from processors.geometry.utils import (
     interpolate_points_by_distance,
     linestring_distance,
 )
-from processors.osm.query import VESPUCIO_OVERPASS_QUERY, OSMDownloader
+from processors.osm.query import (
+    VESPUCIO_NORTE_OVERPASS_QUERY,
+    VESPUCIO_ORIENTE_OVERPASS_QUERY,
+    VESPUCIO_SUR_OVERPASS_QUERY,
+    OSMDownloader,
+)
 from pyproj.crs import CRS
 from rest_api.models import Axles, Segment, Shape
 from rest_api.util.shape import flush_shape_objects
@@ -96,6 +101,11 @@ def split_axis_by_direction(
 
     # Crear un GeoDataFrame por grupo
     result = []
+    if len(bearing_groups) > 2:
+        # Keep the longest two groups only
+        bearing_groups = sorted(
+            bearing_groups, key=lambda g: len(g["indices"]), reverse=True
+        )[:2]
     for group in bearing_groups:
         group_df = df.loc[group["indices"]].copy()
         group_df["bearing"] = group_df.geometry.apply(calculate_bearing)
@@ -214,6 +224,7 @@ def filter_short_lines(gdf: gpd.GeoDataFrame) -> gpd.GeoDataFrame:
     gm = gdf.to_crs(metric_crs).copy()
     gm["length_m"] = gm.geometry.length
     if len(gm) > 1:
+        print(f"Filtering out short lines, keeping the longest of {len(gm)} lines.")
         return gm[gm["length_m"] == gm["length_m"].max()].to_crs(orig_crs)
     return gdf
 
@@ -296,7 +307,8 @@ def keep_main_axis_lines(gdf, tol=1e-6):
     # Eliminar las branches
     branches_idx = remove_branches(lines, keep_idx, parallel_keep)
     keep_idx = [k for k in keep_idx if k not in branches_idx]
-
+    print(f"Paralelas removidas: {parallel_drop}")
+    print(f"Branches removed: {branches_idx}")
     # Crear nuevo GeoDataFrame
     attrs = gdf_copy.iloc[0].drop("geometry").to_dict()
     geoms_to_keep = [lines[k] for k in keep_idx]
@@ -331,7 +343,7 @@ def remove_branches(lines, keep_idx, parallel_keep, tol=1e-6):
     keep_idx = set(keep_idx) - set(parallel_keep)
     for i in keep_idx:
         for j in keep_idx:
-            if i == j:
+            if i == j or i in branches or j in branches:
                 continue
             s1, e1 = endpoints[i]
             s2, e2 = endpoints[j]
@@ -341,6 +353,7 @@ def remove_branches(lines, keep_idx, parallel_keep, tol=1e-6):
             shared_end = e1.distance(s2) < tol or e1.distance(e2) < tol
 
             if shared_start and not shared_end:
+                print(f"Línea {i} es rama de {j} (start compartido)")
                 drop = i if lines[i].length < lines[j].length else j
                 branches.add(drop)
 
@@ -520,6 +533,34 @@ def connect_lines(
         return gdf
 
 
+# New helpers to compute geodesic bearing between two coords and for a LineString
+def bearing_from_coords(a, b) -> float:
+    """
+    Bearing from coord a -> b (lon, lat) in degrees [0, 360).
+    """
+    lat1, lon1 = math.radians(a[1]), math.radians(a[0])
+    lat2, lon2 = math.radians(b[1]), math.radians(b[0])
+    dlon = lon2 - lon1
+    y = math.sin(dlon) * math.cos(lat2)
+    x = math.cos(lat1) * math.sin(lat2) - math.sin(lat1) * math.cos(lat2) * math.cos(
+        dlon
+    )
+    brng = math.degrees(math.atan2(y, x))
+    return (brng + 360) % 360
+
+
+def line_first_last_bearing(line) -> Optional[float]:
+    """
+    Bearing using first and last point of a LineString.
+    """
+    if line is None or line.is_empty or not hasattr(line, "coords"):
+        return None
+    coords = list(line.coords)
+    if len(coords) < 2:
+        return None
+    return round(bearing_from_coords(coords[0], coords[-1]), 2)
+
+
 def orient_linestring_by_bearing(
     line: shp_LineString, target_bearing: float
 ) -> shp_LineString:
@@ -527,20 +568,8 @@ def orient_linestring_by_bearing(
     Reordena la LineString para que su bearing inicial sea consistente
     con target_bearing (0-360). Si la diferencia es mayor a 90°, invierte.
     """
-
-    def bearing_of_coords(a, b):
-        lat1, lon1 = math.radians(a[1]), math.radians(a[0])
-        lat2, lon2 = math.radians(b[1]), math.radians(b[0])
-        dlon = lon2 - lon1
-        y = math.sin(dlon) * math.cos(lat2)
-        x = math.cos(lat1) * math.sin(lat2) - math.sin(lat1) * math.cos(
-            lat2
-        ) * math.cos(dlon)
-        brng = math.degrees(math.atan2(y, x))
-        return (brng + 360) % 360
-
     coords = list(line.coords)
-    start_bearing = bearing_of_coords(coords[0], coords[-1])
+    start_bearing = bearing_from_coords(coords[0], coords[-1])
     diff = min(
         abs(start_bearing - target_bearing), 360 - abs(start_bearing - target_bearing)
     )
@@ -645,20 +674,31 @@ def segment_shape_by_distance(
     )  # 4 metros de tolerancia
     gdf_segments = gdf_segments.to_crs("EPSG:4326")
 
+    # Add per-segment bearing (first -> last point)
+    gdf_segments["bearing"] = gdf_segments.geometry.apply(line_first_last_bearing)
+
     # Add metadata to segments
     for col in shape.columns:
-        if col != "geometry":
+        if col != "geometry" and col not in gdf_segments.columns:
             gdf_segments[col] = shape.iloc[0][col]
 
     return gdf_segments
 
 
 def save_segmented_shape_to_db(
-    segmented_shape: List[shp_LineString], shape_name: str, lanes=None, bus=None
+    segmented_shape: List[shp_LineString],
+    shape_name: str,
+    bearing: List[float] = None,
+    direction: int = None,
 ):
-    shape = Shape.objects.create(**{"name": shape_name, "lanes": lanes, "bus": bus})
+    shape = Shape.objects.create(**{"name": shape_name})
     for sequence, segment in enumerate(segmented_shape):
-        shape.add_segment(sequence=sequence, geometry=segment)
+        shape.add_segment(
+            sequence=sequence,
+            geometry=segment,
+            bearing=bearing[sequence] if bearing else None,
+            direction=direction,
+        )
 
 
 def save_all_segmented_shapes_to_db(
@@ -671,13 +711,12 @@ def save_all_segmented_shapes_to_db(
     for idx, segmented_shape in enumerate(segmented_shapes):
         if shape_name is not None:
             shape_name_ = f"{shape_name}_{segmented_shape['direction_group'].iloc[0]}"
-        lanes = segmented_shape["lanes"].iloc[0] if "lanes" in segmented_shape else None
-        bus = segmented_shape["bus"].iloc[0] if "bus" in segmented_shape else None
+            direction = segmented_shape["direction_group"].iloc[0]
         save_segmented_shape_to_db(
             segmented_shape.geometry.tolist(),
             shape_name=shape_name_,
-            lanes=lanes,
-            bus=bus,
+            bearing=segmented_shape.bearing.tolist(),
+            direction=direction,
         )
 
 
@@ -697,8 +736,12 @@ def process_osm_queries(distance_threshold: float = 500.0, use_fixtures: bool = 
     for idx, axle in enumerate(axles_qs):
         axis_config = {"city": axle.city, "streets": axle.streets}
         try:
-            if axle.name == "Eje Américo Vespucio":
-                query = VESPUCIO_OVERPASS_QUERY
+            if axle.name == "Eje Américo Vespucio Norte":
+                query = VESPUCIO_NORTE_OVERPASS_QUERY
+            elif axle.name == "Eje Américo Vespucio Sur":
+                query = VESPUCIO_SUR_OVERPASS_QUERY
+            elif axle.name == "Eje Américo Vespucio Oriente":
+                query = VESPUCIO_ORIENTE_OVERPASS_QUERY
             else:
                 query = osm_downloader.build_overpass_query(
                     place=axis_config["city"],
@@ -718,19 +761,25 @@ def process_osm_queries(distance_threshold: float = 500.0, use_fixtures: bool = 
 def process_shape_data(
     axis_name: str, axis: Dict, distance_threshold: float = 500.0, flush: bool = True
 ):
+    print("=" * 50)
     print(f"\nProcessing axis: {axis_name} with {len(axis['features'])} features...")
     # Extract features with valid geometry
     query_data = gpd.GeoDataFrame.from_features(axis, crs="EPSG:4326")
-    splitted_gdf = split_axis_by_direction(query_data, bearing_threshold=100.0)
+    splitted_gdf = split_axis_by_direction(query_data, bearing_threshold=94.0)
     segmented_shapes = []
     for i, group_gdf in enumerate(splitted_gdf):
         group_gdf["direction_group"] = i
         group_gdf["group_size"] = len(group_gdf)
         group_gdf["eje_name"] = axis_name
         merged = merge_lines_with_metadata(group_gdf)
+        print(f"Merged shape for direction group {i} has {len(merged)} lines.")
         one_road_gdf = keep_main_axis_lines(merged)
-        conected_gdf = connect_lines(one_road_gdf, max_distance_m=515.0)
+        print(f"One road shape for direction group {i} has {len(one_road_gdf)} lines.")
+        conected_gdf = connect_lines(one_road_gdf, max_distance_m=550.0)
+        print(f"Connected shape for direction group {i} has {len(conected_gdf)} lines.")
         filtered_gdf = filter_short_lines(conected_gdf)
+        print(f"Filtered shape for direction group {i} has {len(filtered_gdf)} lines.")
+        print("=" * 50)
         target_bearing = group_gdf["bearing"].mean()  # o la media del grupo
         filtered_gdf["geometry"] = filtered_gdf.geometry.apply(
             lambda g: orient_linestring_by_bearing(g, target_bearing)
