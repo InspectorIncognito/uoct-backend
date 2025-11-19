@@ -17,8 +17,7 @@ from processors.geometry.utils import (
     interpolate_points_by_distance,
     linestring_distance,
 )
-from processors.osm.query import (
-    VESPUCIO_NORTE_OVERPASS_QUERY,
+from processors.osm.query import (  # VESPUCIO_NORTE_OVERPASS_QUERY,
     VESPUCIO_ORIENTE_OVERPASS_QUERY,
     VESPUCIO_SUR_OVERPASS_QUERY,
     OSMDownloader,
