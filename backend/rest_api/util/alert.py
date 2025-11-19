@@ -211,6 +211,7 @@ def create_alerts(start_time: datetime = None, end_time: datetime = None):
         historic_speed = HistoricSpeed.objects.filter(segment=segment, day_type=day_type,
                                                       temporal_segment=temporal_segment).order_by("-timestamp").first()
         if speed_obj is None or historic_speed is None:
+            logger.info(f"Skipping alert check for segment {segment.segment_id} due to missing speed data.")
             continue
         speed_value = speed_obj.get_speed()
         historic_speed_value = historic_speed.speed
