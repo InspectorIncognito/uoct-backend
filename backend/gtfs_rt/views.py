@@ -41,7 +41,7 @@ class GTFSRTViewSet(viewsets.ModelViewSet):
         else:
             now = timezone.now()
             previous_15_minutes = now - delta_time
-            previous_temporal_segment = get_temporal_segment(previous_15_minutes)
+            previous_temporal_segment = get_temporal_segment(now)
             start_date, end_date = get_temporal_range(previous_temporal_segment)
             print("temporal_range:", start_date, end_date)
             queryset = queryset.filter(
@@ -55,11 +55,11 @@ class GTFSRTViewSet(viewsets.ModelViewSet):
         print(all_services)
         queryset = queryset.filter(service_id__in=all_services)
         print("filtered gps points:", queryset.count())
-        return queryset
+        return queryset.order_by("-timestamp")
 
     @action(detail=False, methods=["get"])
     def to_geojson(self, request):
-        queryset = self.get_queryset()
+        queryset = self.get_queryset().order_by("-timestamp")
         print(f"queryset count: {queryset.count()}")
         geojson_data = []
         for gps in queryset:

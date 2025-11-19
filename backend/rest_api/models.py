@@ -6,9 +6,8 @@ from django.db import models
 from django.utils import timezone
 from geojson.feature import Feature
 from geojson.geometry import LineString
-from gtfs_rt.utils import get_day_type, get_temporal_segment
+from gtfs_rt.utils import get_day_type, get_last_temporal_range, get_temporal_segment
 from processors.geometry.point import Point
-from rest_api.util.temporal_segment import get_last_temporal_segment_data
 from rest_api.vars import SPEED_COLOR_RANGES
 from shapely.geometry import LineString as shp_LineString
 from velocity.constants import DEG_PI, DEG_PI_HALF
@@ -135,9 +134,13 @@ class Segment(models.Model):
             shape_id=self.shape.pk,
             sequence=self.sequence,
         )
-        date, day_type, temporal_segment = get_last_temporal_segment_data()
+        start_time, end_time = get_last_temporal_range()
+        temporal_segment = get_temporal_segment(start_time)
+        day_type = get_day_type(start_time)
         speed = Speed.objects.filter(
-            segment=self, timestamp__date=date, temporal_segment=temporal_segment
+            segment=self,
+            timestamp__date=start_time.date(),
+            temporal_segment=temporal_segment,
         ).first()
 
         if speed:
@@ -197,7 +200,7 @@ class Speed(models.Model):
     day_type = models.CharField(max_length=1, blank=False, null=False, default="L")
     distance = models.FloatField(default=0)
     time_secs = models.FloatField(default=0)
-    timestamp = models.DateTimeField(default=timezone.localtime)
+    timestamp = models.DateTimeField(default=timezone.now)
 
     # speed = models.FloatField(blank=False, null=False)
 
@@ -239,7 +242,7 @@ class HistoricSpeed(models.Model):
     speed = models.FloatField(blank=False, null=False)
     day_type = models.CharField(max_length=1, blank=False, null=False, default="L")
     temporal_segment = models.IntegerField(blank=False, null=False, default=0)
-    timestamp = models.DateTimeField(default=timezone.localtime)
+    timestamp = models.DateTimeField(default=timezone.now)
 
 
 class SingletonModel(models.Model):
@@ -279,7 +282,7 @@ class Alert(models.Model):
     temporal_segment = models.IntegerField(default=0)
     useful = models.IntegerField(default=0)
     useless = models.IntegerField(default=0)
-    timestamp = models.DateTimeField(default=timezone.localtime)
+    timestamp = models.DateTimeField(default=timezone.now)
 
     def get_key_value(self):
         shape = str(self.segment.shape.pk)
