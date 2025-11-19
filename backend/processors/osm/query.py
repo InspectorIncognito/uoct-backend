@@ -81,13 +81,13 @@ EJES_PRINCIPALES = {
             "Avenida Grecia",
         ],
     },
-    "Eje Américo Vespucio Norte": {
-        "city": "Provincia de Santiago",
-        "streets": [
-            "Autopista Vespucio Norte",
-            "Avenida Vespucio Norte",
-        ],
-    },
+    # "Eje Américo Vespucio Norte": {
+    #     "city": "Provincia de Santiago",
+    #     "streets": [
+    #         "Autopista Vespucio Norte",
+    #         "Avenida Vespucio Norte",
+    #     ],
+    # },
     "Eje Américo Vespucio Sur": {
         "city": "Provincia de Santiago",
         "streets": [
@@ -110,10 +110,10 @@ EJES_PRINCIPALES = {
     },
 }
 
-VESPUCIO_NORTE_OVERPASS_QUERY = """relation(6582778);
-way(r)
-  [highway~"^(motorway)$"]
-  [name~"Autopista Vespucio Norte"];"""
+# VESPUCIO_NORTE_OVERPASS_QUERY = """relation(6582778);
+# way(r)
+#   [highway~"^(motorway)$"]
+#   [name~"Autopista Vespucio Norte"];"""
 VESPUCIO_SUR_OVERPASS_QUERY = """relation(6582778);
 way(r)
   [highway~"^(motorway)$"]
