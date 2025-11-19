@@ -1,19 +1,17 @@
 import math
-from typing import Dict, Tuple
+from typing import Dict, List, Tuple
 
-from django.utils import timezone
-
-from gtfs_rt.models import GPSPulse
-from gtfs_rt.services import get_gps_data_from_last_15_minutes
-from rest_api.util.shape import ShapeManager
-from processors.geometry.point import Point
-from typing import List
-from rest_api.models import Segment
-from shapely.geometry import LineString as shp_LineString
-from processors.geometry.line import PolylineSegment
 import geopandas as gpd
+from django.utils import timezone
 from geojson import Feature
 from geojson import Point as GeoPoint
+from gtfs_rt.models import GPSPulse
+from gtfs_rt.services import get_gps_data_from_last_15_minutes
+from processors.geometry.line import PolylineSegment
+from processors.geometry.point import Point
+from rest_api.models import Segment
+from rest_api.util.shape import ShapeManager
+from shapely.geometry import LineString as shp_LineString
 
 DISTANCE_THRESHOLD = 25  # meters
 
@@ -54,19 +52,24 @@ class GridManager(Dict[Tuple[int, int], GridCell]):
             timestamp = gps.timestamp
             timestamp = timezone.localtime(value=timestamp)
             route_id = gps.route_id
-            direction_id = "I" if gps.direction_id == 0 else "R"
+            direction = "I" if gps.direction == 0 else "R"
             license_plate = gps.license_plate
-            feat = Feature(geometry=GeoPoint(coordinates=[gps.longitude, gps.latitude]),
-                           properties=dict(
-                               route_id=route_id,
-                               direction_id=direction_id,
-                               license_plate=license_plate,
-                               timestamp=timestamp
-                           ))
+            bearing = gps.bearing
+            feat = Feature(
+                geometry=GeoPoint(coordinates=[gps.longitude, gps.latitude]),
+                properties=dict(
+                    route_id=route_id,
+                    direction=direction,
+                    bearing=bearing,
+                    license_plate=license_plate,
+                    timestamp=timestamp,
+                ),
+            )
             features.append(feat)
         gdf = gpd.GeoDataFrame.from_features(features)
         return gdf
 
+    # TODO: look where and why is used this method
     def filter_gps(self):
         queryset = get_gps_data_from_last_15_minutes()
         gps_gdf = self.get_gps_gdf(queryset)
@@ -75,7 +78,9 @@ class GridManager(Dict[Tuple[int, int], GridCell]):
         return filtered_gps
 
     def filter_gps_from_dates(self, start_date, end_date):
-        queryset = GPSPulse.objects.filter(timestamp__gte=start_date, timestamp__lte=end_date)
+        queryset = GPSPulse.objects.filter(
+            timestamp__gte=start_date, timestamp__lte=end_date
+        )
         gps_gdf = self.get_gps_gdf(queryset)
         buffered_shape = self.shape_manager.get_buffered_shape()
         filtered_gps = gps_gdf[gps_gdf.geometry.within(buffered_shape)]
@@ -120,11 +125,17 @@ class GridManager(Dict[Tuple[int, int], GridCell]):
         grid_max_lon = bbox[2]
         grid_max_lat = bbox[3]
 
-        lat_dist = Point(grid_min_lat, grid_min_lon).distance(Point(grid_max_lat, grid_min_lon), algorithm='haversine')
-        lon_dist = Point(grid_min_lat, grid_min_lon).distance(Point(grid_min_lat, grid_max_lon), algorithm='haversine')
+        lat_dist = Point(grid_min_lat, grid_min_lon).distance(
+            Point(grid_max_lat, grid_min_lon), algorithm="haversine"
+        )
+        lon_dist = Point(grid_min_lat, grid_min_lon).distance(
+            Point(grid_min_lat, grid_max_lon), algorithm="haversine"
+        )
 
         self.latitude_cells_number = round(lat_dist / self.expected_cell_size_in_meters)
-        self.longitude_cells_number = round(lon_dist / self.expected_cell_size_in_meters)
+        self.longitude_cells_number = round(
+            lon_dist / self.expected_cell_size_in_meters
+        )
 
         delta_lat = grid_max_lat - grid_min_lat
         delta_lon = grid_max_lon - grid_min_lon
@@ -147,7 +158,9 @@ class GridManager(Dict[Tuple[int, int], GridCell]):
         # Return an empty dictionary
         return {}
 
-    def __process_routes(self, grid: Dict[Tuple[int, int], GridCell]) -> Dict[Tuple[int, int], GridCell]:
+    def __process_routes(
+        self, grid: Dict[Tuple[int, int], GridCell]
+    ) -> Dict[Tuple[int, int], GridCell]:
         segments: Dict[int, List[Segment]] = self.shape_manager.get_segments()
         for shape_id, segments in segments.items():
             shape_id = str(shape_id)
@@ -167,7 +180,9 @@ class GridManager(Dict[Tuple[int, int], GridCell]):
                     p1 = Point(latitude=prev_latitude, longitude=prev_longitude)
                     p2 = Point(latitude=curr_lat, longitude=curr_lon)
 
-                    segment_obj = PolylineSegment(p1, p2, current_distance, current_sequence)
+                    segment_obj = PolylineSegment(
+                        p1, p2, current_distance, current_sequence
+                    )
                     if segment_obj.length == 0:  # Skip segments with zero length
                         prev_tuple = coord
                         continue
@@ -178,7 +193,9 @@ class GridManager(Dict[Tuple[int, int], GridCell]):
                     affected_cells = self.__process_segment(p1, p2)
 
                     for cell in affected_cells:
-                        cell_data = grid.get((cell[0], cell[1])) or GridCell(cell[0], cell[1])
+                        cell_data = grid.get((cell[0], cell[1])) or GridCell(
+                            cell[0], cell[1]
+                        )
                         segment_array = cell_data.route_segments.get(shape_id) or []
                         segment_array.append(segment_obj)
                         cell_data.route_segments[shape_id] = segment_array
@@ -205,11 +222,15 @@ class GridManager(Dict[Tuple[int, int], GridCell]):
             affected_cells.append(p1_cell)
 
         elif p1_cell[0] == p2_cell[0]:
-            for j in range(min(p1_cell[1], p2_cell[1]), max(p1_cell[1], p2_cell[1]) + 1):
+            for j in range(
+                min(p1_cell[1], p2_cell[1]), max(p1_cell[1], p2_cell[1]) + 1
+            ):
                 affected_cells.append((p1_cell[0], j))
 
         elif p1_cell[1] == p2_cell[1]:
-            for i in range(min(p1_cell[0], p2_cell[0]), max(p1_cell[0], p2_cell[0]) + 1):
+            for i in range(
+                min(p1_cell[0], p2_cell[0]), max(p1_cell[0], p2_cell[0]) + 1
+            ):
                 affected_cells.append((i, p1_cell[1]))
 
         else:
@@ -235,36 +256,43 @@ class GridManager(Dict[Tuple[int, int], GridCell]):
     def __get_cell_segments(self, i: int, j: int) -> List[shp_LineString]:
         v1 = (
             self.grid_min_latitude + (self.grid_latitude_distance * i),
-            self.grid_min_longitude + (self.grid_longitude_distance * j)
+            self.grid_min_longitude + (self.grid_longitude_distance * j),
         )
 
         v2 = (
             self.grid_min_latitude + (self.grid_latitude_distance * (i + 1)),
-            self.grid_min_longitude + (self.grid_longitude_distance * j)
+            self.grid_min_longitude + (self.grid_longitude_distance * j),
         )
 
         v3 = (
             self.grid_min_latitude + (self.grid_latitude_distance * (i + 1)),
-            self.grid_min_longitude + (self.grid_longitude_distance * (j + 1))
+            self.grid_min_longitude + (self.grid_longitude_distance * (j + 1)),
         )
 
         v4 = (
             self.grid_min_latitude + (self.grid_latitude_distance * i),
-            self.grid_min_longitude + (self.grid_longitude_distance * (j + 1))
+            self.grid_min_longitude + (self.grid_longitude_distance * (j + 1)),
         )
 
         segments = [
             shp_LineString(coordinates=[v1, v2]),
             shp_LineString(coordinates=[v2, v3]),
             shp_LineString(coordinates=[v3, v4]),
-            shp_LineString(coordinates=[v4, v1])
+            shp_LineString(coordinates=[v4, v1]),
         ]
         return segments
 
-    def get_on_route_distances(self, point: Point, shape_id: str, previous_distance=None,
-                               threshold=DISTANCE_THRESHOLD) -> Tuple[float, float] or None:
+    def get_on_route_distances(
+        self,
+        point: Point,
+        shape_id: str,
+        previous_distance=None,
+        threshold=DISTANCE_THRESHOLD,
+    ) -> Tuple[float, float] or None:
         segments = set()
-        lat_index, lon_index = self.get_cell_indexes_from_point(point.latitude, point.longitude)
+        lat_index, lon_index = self.get_cell_indexes_from_point(
+            point.latitude, point.longitude
+        )
 
         for i in range(lat_index - 1, lat_index + 2):
             for j in range(lon_index - 1, lon_index + 2):
@@ -285,7 +313,9 @@ class GridManager(Dict[Tuple[int, int], GridCell]):
                 min_index = min(segments, key=lambda x: x.sequence).sequence
 
                 if max_index - min_index + 1 == len(segments):
-                    distance, projection = self.__get_distances_from_segments(point, segments, threshold)
+                    distance, projection = self.__get_distances_from_segments(
+                        point, segments, threshold
+                    )
 
                 else:
                     segment_groups = [[]]
@@ -303,10 +333,15 @@ class GridManager(Dict[Tuple[int, int], GridCell]):
                     distance = math.inf
                     for segment_group in segment_groups:
                         if len(segment_group) == 1:
-                            distance_aux, projection_aux = segments[0].on_route_distances(point)
+                            distance_aux, projection_aux = segments[
+                                0
+                            ].on_route_distances(point)
                         else:
-                            distance_aux, projection_aux = self.__get_distances_from_segments(point, segment_group,
-                                                                                              threshold)
+                            distance_aux, projection_aux = (
+                                self.__get_distances_from_segments(
+                                    point, segment_group, threshold
+                                )
+                            )
                         if distance_aux is not None and distance_aux < distance:
                             distance = distance_aux
                             projection = projection_aux
@@ -315,20 +350,30 @@ class GridManager(Dict[Tuple[int, int], GridCell]):
             else:
                 raise ValueError("GPS Pulse has no associate cells.")
         else:
-            distance, projection = self.__get_distances_from_segments(point, segments, threshold, previous_distance)
+            distance, projection = self.__get_distances_from_segments(
+                point, segments, threshold, previous_distance
+            )
         if distance is None or projection is None:
-            raise ValueError(f"It could not calculate projection from point {point} to shape_id {shape_id}")
+            raise ValueError(
+                f"It could not calculate projection from point {point} to shape_id {shape_id}"
+            )
         return distance, projection
 
     @staticmethod
-    def __get_distances_from_segments(point: Point, segments: List[PolylineSegment], distance_threshold,
-                                      previous_distance=None) -> Tuple[float, float] or None:
+    def __get_distances_from_segments(
+        point: Point,
+        segments: List[PolylineSegment],
+        distance_threshold,
+        previous_distance=None,
+    ) -> Tuple[float, float] or None:
         closest_distance = math.inf
         closest_on_route_distance = math.inf
 
         for segment in segments:
             aux_dist, aux_proj = segment.on_route_distances(point)
-            if (previous_distance is not None and previous_distance <= aux_proj) or previous_distance is None:
+            if (
+                previous_distance is not None and previous_distance <= aux_proj
+            ) or previous_distance is None:
                 if aux_dist < closest_distance:
                     closest_distance = aux_dist
                     closest_on_route_distance = aux_proj
