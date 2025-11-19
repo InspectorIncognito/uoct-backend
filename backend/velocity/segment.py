@@ -7,17 +7,18 @@ from typing import List
 
 import pytz
 from django.utils.timezone import get_current_timezone
-
 from processors.geometry.point import Point
 from rest_api.util.shape import ShapeManager
-from velocity.expedition import GridManager
+from velocity.grid import GridManager
 
 logger = logging.getLogger(__name__)
 
 
 class SpatialSegment:
 
-    def __init__(self, index: int, start_distance: int, end_distance: int, is_last: bool = False):
+    def __init__(
+        self, index: int, start_distance: int, end_distance: int, is_last: bool = False
+    ):
         self.index = index
         self.start_distance = start_distance
         self.end_distance = end_distance
@@ -25,21 +26,27 @@ class SpatialSegment:
 
     def is_part_of(self, start_distance: int, end_distance: int) -> bool:
         if self.is_last:
-            is_part_of = self.start_distance <= start_distance <= self.end_distance or \
-                         self.start_distance <= end_distance <= self.end_distance
+            is_part_of = (
+                self.start_distance <= start_distance <= self.end_distance
+                or self.start_distance <= end_distance <= self.end_distance
+            )
         else:
-            is_part_of = self.start_distance <= start_distance < self.end_distance or \
-                         self.start_distance <= end_distance < self.end_distance
+            is_part_of = (
+                self.start_distance <= start_distance < self.end_distance
+                or self.start_distance <= end_distance < self.end_distance
+            )
         return is_part_of
 
     def get_name(self):
         return f"{self.start_distance}-{self.end_distance}"
 
     def __eq__(self, other):
-        return (self.index == other.index and
-                self.start_distance == other.start_distance and
-                self.end_distance == other.end_distance and
-                self.is_last == other.is_last)
+        return (
+            self.index == other.index
+            and self.start_distance == other.start_distance
+            and self.end_distance == other.end_distance
+            and self.is_last == other.is_last
+        )
 
     def __hash__(self):
         return hash((self.index, self.start_distance, self.end_distance))
@@ -50,17 +57,30 @@ class SpatialSegment:
 
 class PartialSpatialSegment(SpatialSegment):
 
-    def __init__(self, start_distance: int, end_distance: int, spatial_segment: SpatialSegment):
-        super().__init__(spatial_segment.index, start_distance, end_distance, spatial_segment.is_last)
+    def __init__(
+        self, start_distance: int, end_distance: int, spatial_segment: SpatialSegment
+    ):
+        super().__init__(
+            spatial_segment.index, start_distance, end_distance, spatial_segment.is_last
+        )
         value_error_message = f"partial segment {start_distance}-{end_distance} is not part of {spatial_segment}"
-        if not (spatial_segment.start_distance <= start_distance <= spatial_segment.end_distance and
-                spatial_segment.start_distance <= end_distance <= spatial_segment.end_distance and
-                start_distance <= end_distance):
+        if not (
+            spatial_segment.start_distance
+            <= start_distance
+            <= spatial_segment.end_distance
+            and spatial_segment.start_distance
+            <= end_distance
+            <= spatial_segment.end_distance
+            and start_distance <= end_distance
+        ):
             raise ValueError(value_error_message)
         self.complete_spatial_segment = spatial_segment
 
     def __eq__(self, other):
-        return super().__eq__(other) and self.complete_spatial_segment == other.complete_spatial_segment
+        return (
+            super().__eq__(other)
+            and self.complete_spatial_segment == other.complete_spatial_segment
+        )
 
     def __str__(self):
         return f"PartialSpatialSegment {self.index} -> [{self.start_distance}-{self.end_distance})"
@@ -68,7 +88,9 @@ class PartialSpatialSegment(SpatialSegment):
 
 class TemporalSegment:
 
-    def __init__(self, index: int, start_time: datetime.datetime, end_time: datetime.datetime):
+    def __init__(
+        self, index: int, start_time: datetime.datetime, end_time: datetime.datetime
+    ):
         self.index = index
         self.start_time = start_time
         self.end_time = end_time
@@ -80,9 +102,11 @@ class TemporalSegment:
         return self.start_time.date()
 
     def __eq__(self, other):
-        condition = self.index == other.index and \
-                    self.start_time == other.start_time and \
-                    self.end_time == other.end_time
+        condition = (
+            self.index == other.index
+            and self.start_time == other.start_time
+            and self.end_time == other.end_time
+        )
         return condition
 
     def __hash__(self):
@@ -94,17 +118,29 @@ class TemporalSegment:
 
 class PartialTemporalSegment(TemporalSegment):
 
-    def __init__(self, start_time: datetime.datetime, end_time: datetime.datetime, temporal_segment: TemporalSegment):
+    def __init__(
+        self,
+        start_time: datetime.datetime,
+        end_time: datetime.datetime,
+        temporal_segment: TemporalSegment,
+    ):
         super().__init__(temporal_segment.index, start_time, end_time)
-        value_error_message = f"partial segment {start_time}-{end_time} is not part of {temporal_segment}"
-        if not (temporal_segment.start_time <= start_time <= temporal_segment.end_time and
-                temporal_segment.start_time <= end_time <= temporal_segment.end_time and
-                start_time <= end_time):
+        value_error_message = (
+            f"partial segment {start_time}-{end_time} is not part of {temporal_segment}"
+        )
+        if not (
+            temporal_segment.start_time <= start_time <= temporal_segment.end_time
+            and temporal_segment.start_time <= end_time <= temporal_segment.end_time
+            and start_time <= end_time
+        ):
             raise ValueError(value_error_message)
         self.complete_temporal_segment = temporal_segment
 
     def __eq__(self, other):
-        return super().__eq__(other) and self.complete_temporal_segment == other.complete_temporal_segment
+        return (
+            super().__eq__(other)
+            and self.complete_temporal_segment == other.complete_temporal_segment
+        )
 
     def __str__(self):
         return f"PartialTemporalSegment {self.index} -> [{self.start_time}-{self.end_time})"
@@ -118,36 +154,47 @@ class SegmentCriteria:
         self.shape_manager = ShapeManager()
 
     def get_spatial_segment(self, *args, **kwargs):
-        raise NotImplementedError('You must create a subclass of')
+        raise NotImplementedError("You must create a subclass of")
 
-    def get_temporal_segment(self, dt: datetime.datetime,
-                             timezone: datetime.tzinfo = get_current_timezone()):
+    def get_temporal_segment(
+        self, dt: datetime.datetime, timezone: datetime.tzinfo = get_current_timezone()
+    ):
         if dt.tzinfo is None:
             raise ValueError("datetime instance must have a tzinfo")
         converted_timestamp = dt.astimezone(timezone)
         day_minutes = converted_timestamp.minute + converted_timestamp.hour * 60
         index = int(day_minutes / self.temporal_segment_duration)
 
-        start_time = converted_timestamp.replace(hour=0, minute=0, second=0, microsecond=0)
-        start_time = start_time + datetime.timedelta(minutes=index * self.temporal_segment_duration)
-        end_time = start_time + datetime.timedelta(minutes=self.temporal_segment_duration)
+        start_time = converted_timestamp.replace(
+            hour=0, minute=0, second=0, microsecond=0
+        )
+        start_time = start_time + datetime.timedelta(
+            minutes=index * self.temporal_segment_duration
+        )
+        end_time = start_time + datetime.timedelta(
+            minutes=self.temporal_segment_duration
+        )
 
         ts_obj = TemporalSegment(index, start_time, end_time)
         return ts_obj
 
-    def get_day_type(self, dt: datetime.datetime, timezone: datetime.tzinfo = get_current_timezone()):
+    def get_day_type(
+        self, dt: datetime.datetime, timezone: datetime.tzinfo = get_current_timezone()
+    ):
         if dt.tzinfo is None:
             raise ValueError("datetime instance must have a tzinfo")
         converted_timestamp = dt.astimezone(timezone)
         weekday = converted_timestamp.weekday()
-        day_type = 'L' if weekday < 5 else 'S' if weekday == 5 else 'D'
+        day_type = "L" if weekday < 5 else "S" if weekday == 5 else "D"
 
         return day_type
 
     def get_range_of_spatial_segments(self, *args, **kwargs):
-        raise NotImplementedError('You must create a subclass of')
+        raise NotImplementedError("You must create a subclass of")
 
-    def get_range_of_temporal_segments(self, dt1: datetime.datetime, dt2: datetime.datetime) -> list[datetime]:
+    def get_range_of_temporal_segments(
+        self, dt1: datetime.datetime, dt2: datetime.datetime
+    ) -> list[datetime]:
         """
         Obtains a list of temporal intervals between two datetime.
 
@@ -165,7 +212,9 @@ class SegmentCriteria:
         periods = []
         first_temp_segment = self.get_temporal_segment(dt1)
         if first_temp_segment.start_time < dt1:
-            new_first_temp_segment = PartialTemporalSegment(dt1, first_temp_segment.end_time, first_temp_segment)
+            new_first_temp_segment = PartialTemporalSegment(
+                dt1, first_temp_segment.end_time, first_temp_segment
+            )
             periods.append(new_first_temp_segment)
         else:
             periods.append(first_temp_segment)
@@ -173,17 +222,23 @@ class SegmentCriteria:
         while True:
             if periods[-1].end_time >= dt2:
                 break
-            new_end_time = periods[-1].end_time + datetime.timedelta(minutes=self.temporal_segment_duration)
+            new_end_time = periods[-1].end_time + datetime.timedelta(
+                minutes=self.temporal_segment_duration
+            )
 
             next_index = int((periods[-1].index + 1) % number_of_periods)
-            periods.append(TemporalSegment(next_index, periods[-1].end_time, new_end_time))
+            periods.append(
+                TemporalSegment(next_index, periods[-1].end_time, new_end_time)
+            )
 
         if periods[-1].end_time > dt2:
             if isinstance(periods[-1], PartialTemporalSegment):
                 segment_parent = periods[-1].complete_temporal_segment
             else:
                 segment_parent = periods[-1]
-            periods[-1] = PartialTemporalSegment(periods[-1].start_time, dt2, segment_parent)
+            periods[-1] = PartialTemporalSegment(
+                periods[-1].start_time, dt2, segment_parent
+            )
 
         return periods
 
@@ -194,8 +249,10 @@ class FiveHundredMeterSegmentCriteria(SegmentCriteria):
         super().__init__(grid_manager)
         self.spatial_segment_distance = 500  # in meters
         self.shape_id_distance_dict = self.__calculate_shape_distance()
-        self.spatial_segments_by_shape_id, self.spatial_segment_init_list_by_shape_id = \
-            self.__calculate_spatial_segments()
+        (
+            self.spatial_segments_by_shape_id,
+            self.spatial_segment_init_list_by_shape_id,
+        ) = self.__calculate_spatial_segments()
 
     def __calculate_shape_distance(self):
         return self.shape_manager.get_distances()
@@ -215,7 +272,9 @@ class FiveHundredMeterSegmentCriteria(SegmentCriteria):
             for index, start_distance in enumerate(range_list[:-1]):
                 end_distance = range_list[index + 1]
                 is_last = end_distance == distance
-                ss_obj = SpatialSegment(index, start_distance, end_distance, is_last=is_last)
+                ss_obj = SpatialSegment(
+                    index, start_distance, end_distance, is_last=is_last
+                )
                 segment_list.append(ss_obj)
                 segment_init_list[shape_id].append(start_distance)
             data[shape_id] = segment_list
@@ -224,7 +283,9 @@ class FiveHundredMeterSegmentCriteria(SegmentCriteria):
 
     def get_spatial_segment(self, shape_id: str, distance: int) -> SpatialSegment:
         segment_list = self.spatial_segments_by_shape_id[shape_id]
-        index = bisect_right(self.spatial_segment_init_list_by_shape_id[shape_id], distance)
+        index = bisect_right(
+            self.spatial_segment_init_list_by_shape_id[shape_id], distance
+        )
 
         if distance < 0 or distance > segment_list[-1].end_distance:
             raise ValueError(f"distance {distance} is not part of the shape {shape_id}")
@@ -234,8 +295,9 @@ class FiveHundredMeterSegmentCriteria(SegmentCriteria):
         else:
             return segment_list[index - 1]
 
-    def get_range_of_spatial_segments(self, shape_id: str, start_distance: int, end_distance: int) -> List[
-        SpatialSegment or PartialSpatialSegment]:
+    def get_range_of_spatial_segments(
+        self, shape_id: str, start_distance: int, end_distance: int
+    ) -> List[SpatialSegment or PartialSpatialSegment]:
         """
         Parameters:
         - `shape_id`: A string representing the shape identifier.
@@ -254,12 +316,16 @@ class FiveHundredMeterSegmentCriteria(SegmentCriteria):
                 aux_start_distance = min(end_distance, segment_obj.end_distance)
 
         if start_distance > result_segment[0].start_distance:
-            result_segment[0] = PartialSpatialSegment(start_distance, result_segment[0].end_distance, result_segment[0])
+            result_segment[0] = PartialSpatialSegment(
+                start_distance, result_segment[0].end_distance, result_segment[0]
+            )
         if end_distance < result_segment[-1].end_distance:
             if isinstance(result_segment[-1], PartialSpatialSegment):
                 segment_parent = result_segment[-1].complete_spatial_segment
             else:
                 segment_parent = result_segment[-1]
-            result_segment[-1] = PartialSpatialSegment(result_segment[-1].start_distance, end_distance, segment_parent)
+            result_segment[-1] = PartialSpatialSegment(
+                result_segment[-1].start_distance, end_distance, segment_parent
+            )
 
         return result_segment
