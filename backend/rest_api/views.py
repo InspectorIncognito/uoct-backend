@@ -7,7 +7,11 @@ from django.http import JsonResponse, StreamingHttpResponse
 from django.utils import timezone
 from geojson import Feature, FeatureCollection, Point
 from gtfs_rt.processors.speed import calculate_speed
-from gtfs_rt.utils import get_last_temporal_segment, get_previous_month
+from gtfs_rt.utils import (
+    get_last_temporal_range,
+    get_last_temporal_segment,
+    get_previous_month,
+)
 from processors.models.shapes import shapes_to_geojson
 from rest_api.models import (
     Alert,
@@ -129,15 +133,13 @@ class GenericSpeedViewSet(viewsets.ModelViewSet, mixins.ListModelMixin):
 
         if month is not None:
             month = int(month)
-            year = timezone.localtime().year
+            year = timezone.now().year
             queryset = queryset.filter(timestamp__year=year, timestamp__month=month)
         if start_time is not None and end_time is not None:
             start_time = datetime.strptime(start_time, "%Y-%m-%dT%H:%M:%SZ")
-            start_time = timezone.make_aware(
-                start_time, timezone.get_current_timezone()
-            )
+            start_time = timezone.make_aware(start_time, timezone.utc)
             end_time = datetime.strptime(end_time, "%Y-%m-%dT%H:%M:%SZ")
-            end_time = timezone.make_aware(end_time, timezone.get_current_timezone())
+            end_time = timezone.make_aware(end_time, timezone.utc)
             queryset = queryset.filter(
                 timestamp__gte=start_time, timestamp__lte=end_time
             )
@@ -156,8 +158,6 @@ class GenericSpeedViewSet(viewsets.ModelViewSet, mixins.ListModelMixin):
             fieldnames = list(fieldnames_dict.keys())
             row = []
             for field in fieldnames:
-                if field == "timestamp":
-                    obj[field] = timezone.localtime(obj[field])
                 row.append(str(obj[field]))
             yield ",".join(row) + "\n"
 
@@ -178,10 +178,10 @@ class SpeedViewSet(GenericSpeedViewSet):
             "timestamp",
         )
         if len(query_params) == 0:
-            previous_date, previous_temporal_segment = get_last_temporal_segment()
+            start_time, end_time = get_last_temporal_range()
             queryset = queryset.filter(
-                timestamp__date=previous_date,
-                temporal_segment=previous_temporal_segment,
+                timestamp__gte=start_time,
+                timestamp__lte=end_time,
             )
         fieldnames_dict = dict(
             segment__shape="shape",
@@ -260,10 +260,10 @@ class AlertViewSet(viewsets.ModelViewSet):
             )
         )
         if len(self.request.query_params) == 0:
-            previous_date, previous_temporal_segment = get_last_temporal_segment()
+            start_time, end_time = get_last_temporal_range()
             queryset = queryset.filter(
-                timestamp__date=previous_date,
-                temporal_segment=previous_temporal_segment,
+                timestamp__gte=start_time,
+                timestamp__lte=end_time,
             )
         response = dict(count=queryset.count(), results=list(queryset))
         return JsonResponse(response, safe=False)
