@@ -111,7 +111,7 @@ def load_shapes_as_trajectories(gdf: gpd.GeoDataFrame) -> pd.DataFrame:
         gdf["shape_id"] = gdf.index.astype(str)
 
     # Ensure presence of expected metadata columns (may be missing)
-    for col in ["route_id", "direction_id"]:
+    for col in ["route_id", "direction"]:
         if col not in gdf.columns:
             gdf[col] = None
 
@@ -142,9 +142,7 @@ def load_shapes_as_trajectories(gdf: gpd.GeoDataFrame) -> pd.DataFrame:
             {
                 "shape_id": str(r["shape_id"]),
                 "route_id": None if pd.isna(r["route_id"]) else r["route_id"],
-                "direction": (
-                    None if pd.isna(r["direction_id"]) else r["direction_id"]
-                ),
+                "direction": (None if pd.isna(r["direction"]) else r["direction"]),
                 # For reuse with existing batch matcher
                 "license_plate": str(r["shape_id"]),
                 "points": cleaned,
@@ -156,7 +154,7 @@ def load_shapes_as_trajectories(gdf: gpd.GeoDataFrame) -> pd.DataFrame:
     df = pd.DataFrame(rows)
 
     # Filter tiny shapes
-    MIN_POINTS = 3
+    MIN_POINTS = 2
     df = df[df["n_points"] >= MIN_POINTS].reset_index(drop=True)
     print(f"Filtered trajectories: kept {len(df)} (min_points={MIN_POINTS})")
     return df
@@ -235,11 +233,11 @@ def assign_routes_to_segments(
 
     # 5) Mapa shape_id -> route_id para recuperar la ruta de cada shape
     #    (shapes_trajectories ya trae route_id por shape_id)
-    route_by_shape = (
-        shapes_trajectories[["shape_id", "route_id"]]
+    route_direction_by_shape = (
+        shapes_trajectories[["shape_id", "route_id", "direction"]]
         .drop_duplicates()
-        .set_index("shape_id")["route_id"]
-        .to_dict()
+        .set_index("shape_id")
+        .to_dict(orient="index")
     )
 
     # 6) Agregar por segmento todas las rutas observadas
@@ -247,9 +245,27 @@ def assign_routes_to_segments(
     routes_per_segment: Dict[str, set] = {}
 
     for shape_id, axis_map in batch_results.items():
-        route_id = route_by_shape.get(shape_id)
+        route_data = route_direction_by_shape.get(shape_id)
+        if route_data is None:
+            continue
+
+        route_id = route_data.get("route_id")
+        direction = route_data.get("direction")
+        print(
+            f"Processing shape_id={shape_id} with route_id={route_id} direction={direction}"
+        )
+
         if route_id is None or (isinstance(route_id, float) and pd.isna(route_id)):
             continue  # sin route_id, no se agrega servicio
+
+        # Agregar sufijo de dirección: 0 -> "I", 1 -> "R"
+        if direction == 0 or direction == "0":
+            route_id_with_direction = f"{route_id}I"
+        elif direction == 1 or direction == "1":
+            route_id_with_direction = f"{route_id}R"
+        else:
+            # Si direction es None o inválido, guardar sin sufijo
+            route_id_with_direction = str(route_id)
 
         for axis_id, (
             matched_segments,
@@ -276,7 +292,9 @@ def assign_routes_to_segments(
                 ):
                     continue
 
-                routes_per_segment.setdefault(str(seg_uuid), set()).add(str(route_id))
+                routes_per_segment.setdefault(str(seg_uuid), set()).add(
+                    route_id_with_direction
+                )
 
     print(f"Routes per segment found: {len(routes_per_segment)} segments")
 
