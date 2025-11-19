@@ -1,9 +1,11 @@
 import logging
+
 import django_rq
 from django.conf import settings
+from django.utils import timezone
+from django_rq.management.commands import rqscheduler
 from gtfs_rt.processors.proto import download_proto_data
 from gtfs_rt.utils import flush_gps_pulses
-from django_rq.management.commands import rqscheduler
 from processors.speed.avg_speed import get_last_month_avg_speed
 from rest_api.util.process import calculate_speed_and_check_alerts
 
@@ -21,21 +23,29 @@ def clear_scheduled_jobs():
 
 def register_scheduled_jobs():
     print("Adding jobs to scheduler")
+    # scheduler.schedule(
+    #    scheduled_time=timezone.now(),  # Empezar ahora
+    #    func=download_proto_data,
+    #    args=[],
+    #    interval=30,  # segundos
+    #    repeat=None,  # repetir indefinidamente
+    #    queue_name=settings.CRONLIKE_QUEUE,
+    # )
     scheduler.cron(
-        '0/1 * * * *',  # every minute
+        "0/1 * * * *",  # every minute
         func=download_proto_data,  # Function to be queued
         args=[],  # Arguments passed into function when executed
         queue_name=settings.CRONLIKE_QUEUE,  # In which queue the job should be put in
         repeat=None,  # Repeat this number of times (None means repeat forever)
-        use_local_timezone=False  # Interpret hours in the local timezone
+        use_local_timezone=False,  # Interpret hours in the local timezone
     )
     scheduler.cron(
-        '0/15 * * * *',  # every 15 minutes
+        "0/15 * * * *",  # every 15 minutes
         func=calculate_speed_and_check_alerts,  # Function to be queued
         args=[],  # Arguments passed into function when executed
         queue_name=settings.CRONLIKE_QUEUE,  # In which queue the job should be put in
         repeat=None,  # Repeat this number of times (None means repeat forever)
-        use_local_timezone=False  # Interpret hours in the local timezone
+        use_local_timezone=False,  # Interpret hours in the local timezone
     )
     scheduler.cron(
         "0 0 1 * *",  # at 00:00 every day-of-month 1
@@ -43,7 +53,7 @@ def register_scheduled_jobs():
         args=[],  # Arguments passed into function when executed
         queue_name=settings.CRONLIKE_QUEUE,  # In which queue the job should be put in
         repeat=None,  # Repeat this number of times (None means repeat forever)
-        use_local_timezone=False
+        use_local_timezone=False,
     )
     scheduler.cron(
         "0 0 1 * *",  # at 00:00 every day-of-month 1
@@ -51,7 +61,7 @@ def register_scheduled_jobs():
         args=[],  # Arguments passed into function when executed
         queue_name=settings.CRONLIKE_QUEUE,  # In which queue the job should be put in
         repeat=None,  # Repeat this number of times (None means repeat forever)
-        use_local_timezone=False
+        use_local_timezone=False,
     )
 
 

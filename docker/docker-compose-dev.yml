@@ -42,3 +42,20 @@ services:
     profiles: ["dev", "test"]
     ports:
       - "5431:5432"
+  worker:
+    volumes:
+      - ../backend:/app/backend # ← Monta el código fuente
+    environment:
+      - DEBUG=True
+  rq-dashboard:
+    profiles: ["dev", "prod"] # Disponible en dev y prod
+    image: eoranged/rq-dashboard
+    container_name: rq_dashboard
+    ports:
+      - "9181:9181"
+    environment:
+      - RQ_DASHBOARD_REDIS_URL=redis://cache:6379/0
+    depends_on:
+      - cache
+    networks:
+      - cache_network
