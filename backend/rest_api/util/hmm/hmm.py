@@ -45,7 +45,7 @@ def precompute_direction_cache(
             "Inferring binary direction groups from geometry orientation."
         )
         groups = {}
-        for idx, row in segments_gdf.iterrows():
+        for idx, row in zip(segments_gdf.segment_pk, segments_gdf.itertuples()):
             geom = row.geometry
             try:
                 start = geom.coords[0]
@@ -57,8 +57,9 @@ def precompute_direction_cache(
             groups.setdefault(dir_id, []).append(idx)
     else:
         groups = {}
-        for idx, row in segments_gdf.iterrows():
+        for idx in segments_gdf.segment_pk:
             try:
+                row = segments_gdf[segments_gdf.segment_pk == idx].iloc[0]
                 dir_id = int(row[use_attribute])
             except Exception:
                 dir_id = row[use_attribute]
@@ -70,13 +71,14 @@ def precompute_direction_cache(
     segments_by_direction = {}
     segment_to_direction = {}  # NEW: Reverse mapping
 
-    for dir_id, idx_list in groups.items():
-        dir_segments = segments_gdf.loc[idx_list]
+    for dir_id, segment_pk_list in groups.items():
+        # Filtrar por segment_pk
+        dir_segments = segments_gdf[segments_gdf.segment_pk.isin(segment_pk_list)]
         segments_by_direction[dir_id] = dir_segments
 
-        # Build reverse mapping
-        for idx in idx_list:
-            segment_to_direction[idx] = dir_id
+    # Build reverse mapping
+    for seg_pk in segment_pk_list:  
+        segment_to_direction[seg_pk] = dir_id
 
         # Build unified geometry
         try:
@@ -115,7 +117,7 @@ def build_segment_cache(segments_gdf: gpd.GeoDataFrame) -> SegmentCache:
 
     # debug log removed
 
-    for idx, row in segments_gdf.iterrows():
+    for idx, row in zip(segments_gdf.segment_pk, segments_gdf.itertuples()):
         geometries[idx] = row.geometry
         if has_bearing:
             try:
@@ -207,14 +209,14 @@ def build_spatial_index(
 
     densified_coords = []
     segment_ids = []
-
-    for idx, geom in enumerate(segments_gdf.geometry):
+    #NOTE: use segment.pk no enumerate for the idx
+    for idx, geom in zip(segments_gdf.segment_pk, segments_gdf.geometry):
         if geom is None:
             continue
         pts = densify_linestring(geom, interval=interval, is_geographic=is_geo)
         for p in pts:
             densified_coords.append((p.x, p.y))
-            segment_ids.append(segments_gdf.index[idx])
+            segment_ids.append(idx)
 
     if len(densified_coords) == 0:
         print("build_spatial_index: no densified points produced from segments_gdf")
