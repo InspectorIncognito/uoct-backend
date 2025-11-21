@@ -1,6 +1,7 @@
 from typing import Dict, List
 
 import geopandas as gpd
+import pandas as pd
 from geojson import Feature, FeatureCollection, LineString
 from rest_api.models import (
     Alert,
@@ -12,6 +13,7 @@ from rest_api.models import (
     Stop,
     TrafficSignal,
 )
+from rest_api.util.hmm.hmm import precompute_axes_caches
 from shapely.geometry import LineString as shp_LineString
 from velocity.constants import DEG_PI, DEG_PI_HALF
 
@@ -19,6 +21,9 @@ from velocity.constants import DEG_PI, DEG_PI_HALF
 class ShapeManager:
     def __init__(self):
         self.shapes = Shape.objects.all()
+        self.spatial_indices = dict()
+        self.direction_caches = dict()
+        self.segment_caches = dict()
 
     def get_bbox(self):
         bbox_min_lat = DEG_PI_HALF
@@ -37,14 +42,39 @@ class ShapeManager:
         return {shape.pk: list(shape.get_segments()) for shape in self.shapes}
 
     def get_segments_gdf(self):
-        """Return a dictionary of GeoDataFrames, one per shape, containing its segments."""
-        segments_dict: Dict[int, gpd.GeoDataFrame] = {}
+        """Return a dictionary of GeoDataFrames, one per axis, concatenating both directions.
+
+        For example, "Eje Alameda_0" and "Eje Alameda_1" are concatenated into a single
+        GeoDataFrame with key "Eje Alameda", preserving all segments from both directions.
+        """
+        segments_dict: Dict[str, gpd.GeoDataFrame] = {}
         for shape in self.shapes:
             name = shape.name
-            axis_name = name.rsplit("_", 1)[0]
+            axis_name = name.rsplit("_", 1)[0] if "_" in name else name
             segments_gdf = shape.get_segments_gdf()
-            segments_dict[axis_name] = segments_gdf
+
+            if segments_gdf.empty:
+                continue
+
+            # Concatenate segments from both directions of the same axis
+            if axis_name in segments_dict:
+                segments_dict[axis_name] = gpd.GeoDataFrame(
+                    pd.concat(
+                        [segments_dict[axis_name], segments_gdf], ignore_index=True
+                    ),
+                    crs=segments_gdf.crs,
+                )
+            else:
+                segments_dict[axis_name] = segments_gdf
+
         return segments_dict
+
+    def shapes_cache(self, segments_gdfs: Dict[str, gpd.GeoDataFrame] = None):
+        if segments_gdfs is None:
+            segments_gdfs = self.get_segments_gdf()
+        self.spatial_indices, self.direction_caches, self.segment_caches = (
+            precompute_axes_caches(segments_gdfs)
+        )
 
     def get_distances(self):
         shape_dict = {}

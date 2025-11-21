@@ -2,6 +2,7 @@ from datetime import datetime
 from zoneinfo import ZoneInfo
 
 from django.utils.timezone import get_current_timezone
+from geopandas import GeoDataFrame
 from velocity.gps import GPSPulse as GPS
 from velocity.grid import GridManager
 from velocity.segment import (
@@ -20,7 +21,6 @@ class ExpeditionData:
     def __init__(
         self,
         grid_manager: GridManager,
-        shape_id: str,
         route_id: str,
         timestamp: datetime,
         license_plate: str,
@@ -29,8 +29,8 @@ class ExpeditionData:
 
         self.license_plate = license_plate
         self.timestamp = timestamp
-        self.shape_id = shape_id
         self.route_id = route_id
+        self.shape_id = None
 
         self.gps_points = []
         self.gps_distance_to_route = []
@@ -42,33 +42,9 @@ class ExpeditionData:
 
     def add_gps_point(self, gps_pulse: GPS):
         if len(self.gps_points) == 0:
-            try:
-                dist_to_route, dist_on_route = self.grid_manager.get_on_route_distances(
-                    gps_pulse, self.shape_id
-                )
-            except ValueError as e:
-                pass
-                # print(e)
-            else:
-                self.gps_distance_to_route.append(dist_to_route)
-                self.gps_distance_on_route.append(dist_on_route)
-                self.gps_distance_on_route_dict[gps_pulse] = dist_on_route
-                self.gps_points.append(gps_pulse)
+            self.gps_points.append(gps_pulse)
         elif gps_pulse.timestamp > self.gps_points[-1].timestamp:
-            # print(f"expedition {self} not empty")
-            previous_distance = self.gps_distance_on_route[-1]
-            try:
-                dist_to_route, dist_on_route = self.grid_manager.get_on_route_distances(
-                    gps_pulse, self.shape_id, previous_distance
-                )
-            except ValueError as e:
-                pass
-
-            else:
-                self.gps_distance_to_route.append(dist_to_route)
-                self.gps_distance_on_route.append(dist_on_route)
-                self.gps_distance_on_route_dict[gps_pulse] = dist_on_route
-                self.gps_points.append(gps_pulse)
+            self.gps_points.append(gps_pulse)
         elif gps_pulse.timestamp == self.gps_points[-1].timestamp:
             # print(f'gps point {gps_pulse} is equal to previous gps point {gps_pulse}.')
             self.ignored_gps_pulses += 1
@@ -239,12 +215,13 @@ class ExpeditionData:
     def __eq__(self, other):
         return (
             self.license_plate == other.license_plate
-            and self.shape_id == other.shape_id
             and self.route_id == other.route_id
         )
 
     def __hash__(self):
-        return hash((self.license_plate, self.shape_id, self.route_id))
+        return hash((self.license_plate, self.route_id))
 
     def __str__(self):
-        return f"Expedition ({self.route_id},{self.license_plate})"
+        route = self.route_id if self.route_id else "Unknown"
+        shape = self.shape_id if self.shape_id else "NoShape"
+        return f"Expedition ({route},{self.license_plate},{shape})"

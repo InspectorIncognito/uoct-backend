@@ -12,11 +12,11 @@ class VehicleData:
         self.license_plate = license_plate
 
     def add_gps_pulse(
-        self, gps_point: GPS, shape_id: str, route_id: str, license_plate: str
-    ):
+        self, gps_point: GPS, route_id: str, license_plate: str
+    ):  
+        # TODO: ver si es necesario crear nuevas expediciones si hay gaps de tiempo grandes.
         new_exp = ExpeditionData(
             self.grid_manager,
-            shape_id,
             route_id,
             timestamp=gps_point.timestamp,
             license_plate=license_plate,
@@ -61,19 +61,19 @@ class VehicleManager:
         try:
             if direction is not None:
                 direction_str = "I" if direction == 0 else "R"
-            route_id = f"{route}{direction_str if direction is not None else ''}"
-            shape_id = get_shape_by_route_id(self.services, route_id)
-            if shape_id is None:
-                self.gps_ignored += 1
-                raise ValueError(f"Skipping GPS pulse for route {route_id}.")
+            if route is not None:
+                route_id = f"{route}{direction_str if direction is not None else ''}"
+            else:
+                route_id = None
             gps_obj = GPS(
                 latitude=latitude,
                 longitude=longitude,
                 bearing=bearing,
                 timestamp=timestamp,
+                direction=direction,
             )
             self.vehicles[vehicle_data].add_gps_pulse(
-                gps_obj, shape_id, route_id, license_plate
+                gps_obj, route_id, license_plate
             )
         except ValueError as e:
             pass

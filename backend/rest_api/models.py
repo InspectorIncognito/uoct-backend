@@ -34,6 +34,7 @@ class Shape(models.Model):
             line = shp_LineString(coordinates=segment.geometry)
             data.append(
                 {
+                    "segment_pk": segment.pk,
                     "shape_id": self.name,
                     "segment_id": segment.segment_id,
                     "direction": segment.direction,

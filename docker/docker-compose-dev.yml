@@ -42,11 +42,6 @@ services:
     profiles: ["dev", "test"]
     ports:
       - "5431:5432"
-  worker:
-    volumes:
-      - ../backend:/app/backend # ← Monta el código fuente
-    environment:
-      - DEBUG=True
   rq-dashboard:
     profiles: ["dev", "prod"] # Disponible en dev y prod
     image: eoranged/rq-dashboard

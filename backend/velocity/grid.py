@@ -1,5 +1,5 @@
 import math
-from typing import Dict, List, Tuple
+from typing import Dict, List, Optional, Tuple
 
 import geopandas as gpd
 from django.utils import timezone
@@ -11,7 +11,10 @@ from processors.geometry.line import PolylineSegment
 from processors.geometry.point import Point
 from rest_api.models import Segment
 from rest_api.util.shape import ShapeManager
+from velocity.vehicle import VehicleManager
 from shapely.geometry import LineString as shp_LineString
+
+from backend.rest_api.util.hmm.hmm import viterbi
 
 DISTANCE_THRESHOLD = 25  # meters
 
@@ -52,7 +55,7 @@ class GridManager(Dict[Tuple[int, int], GridCell]):
             timestamp = gps.timestamp
             timestamp = timezone.localtime(value=timestamp)
             route_id = gps.route_id
-            direction = "I" if gps.direction == 0 else "R"
+            direction = gps.direction
             license_plate = gps.license_plate
             bearing = gps.bearing
             feat = Feature(
@@ -73,18 +76,14 @@ class GridManager(Dict[Tuple[int, int], GridCell]):
     def filter_gps(self):
         queryset = get_gps_data_from_last_15_minutes()
         gps_gdf = self.get_gps_gdf(queryset)
-        buffered_shape = self.shape_manager.get_buffered_shape()
-        filtered_gps = gps_gdf[gps_gdf.geometry.within(buffered_shape)]
-        return filtered_gps
+        return gps_gdf
 
     def filter_gps_from_dates(self, start_date, end_date):
         queryset = GPSPulse.objects.filter(
             timestamp__gte=start_date, timestamp__lte=end_date
         )
         gps_gdf = self.get_gps_gdf(queryset)
-        buffered_shape = self.shape_manager.get_buffered_shape()
-        filtered_gps = gps_gdf[gps_gdf.geometry.within(buffered_shape)]
-        return filtered_gps
+        return gps_gdf
 
     def process(self):
         grid = self.__create_grid()
@@ -381,3 +380,65 @@ class GridManager(Dict[Tuple[int, int], GridCell]):
             return closest_distance, closest_on_route_distance
         else:
             return None, None
+
+    def run_hmm_map_matching(
+        self,
+        vm: VehicleManager,
+        max_distance: int = 40,
+        sigma: float = 25,
+        beta: float = 40,
+        min_candidates: int = 2,
+        sigma_bearing: float = 40,
+        bearing_weight_factor: float = 0.5,
+    ):
+        segments_gdfs: Dict[str, gpd.GeoDataFrame] = (
+            self.shape_manager.get_segments_gdf()
+        )
+        # Preculate shapes caches
+        # TODO: Change spatial idx to use segment.pk or similar
+        # NOTE: now shapes_cache method return the segment pk for the segment ids
+        self.shape_manager.shapes_cache(segments_gdfs=segments_gdfs)
+
+        batch_results: Dict[
+            str, Dict[str, Tuple[List[Optional[int]], List[int], List[Optional[Point]]]]
+        ] = {}
+        for vehicle_data in vm.vehicles.values():
+            for expedition in vehicle_data.expeditions.values():
+                trajectory = [
+                    (gps_point.latitude, gps_point.longitude)
+                    for gps_point in expedition.gps_points
+                ]
+                bearings = [gps_point.bearing for gps_point in expedition.gps_points]
+                excluded_indices = set()
+                per_traj_results: Dict[
+                    str, Tuple[List[Optional[int]], List[int], List[Optional[Point]]]
+                ] = {}
+                for axis_id in segments_gdfs.keys():
+                    # TODO: use proper indentifiers for segments. Right now, we are using the index in the GeoDataFrame, wich is not stable.
+                    # Use segment.pk or similar.
+                    matched_segments, valid_indices, projected_points = viterbi(
+                        trajectory,
+                        self.shape_manager.direction_caches[axis_id],
+                        self.shape_manager.spatial_indices[axis_id],
+                        self.shape_manager.segment_caches[axis_id],
+                        max_distance=max_distance,
+                        sigma=sigma,
+                        beta=beta,
+                        min_candidates=min_candidates,
+                        excluded_indices=excluded_indices,
+                        gps_bearings=bearings,
+                        sigma_bearing=sigma_bearing,
+                        bearing_weight_factor=bearing_weight_factor,
+                    )
+                    if valid_indices:
+                        per_traj_results[axis_id] = (
+                            matched_segments,
+                            valid_indices,
+                            projected_points,
+                        )
+                        excluded_indices.update(valid_indices)
+
+                batch_results[str(expedition)] = per_traj_results
+        return batch_results
+    
+    

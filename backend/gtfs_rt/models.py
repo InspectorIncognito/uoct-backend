@@ -3,7 +3,7 @@ from django.utils import timezone
 
 
 class GPSPulse(models.Model):
-    route_id = models.CharField(max_length=64)
+    route_id = models.CharField(max_length=64, null=True, blank=True)
     direction = models.IntegerField(null=True, blank=True)
     license_plate = models.CharField(max_length=24, default="NN")
     latitude = models.FloatField()

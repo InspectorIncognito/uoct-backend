@@ -1,4 +1,4 @@
-from gtfs_rt.processors.speed import calculate_speed
+from gtfs_rt.processors.speed_hmm import calculate_speed
 from gtfs_rt.utils import get_last_temporal_range
 from rest_api.util.alert import TranSappSiteManager, create_alerts, update_alerts
 
@@ -9,8 +9,6 @@ def calculate_speed_and_check_alerts():
     calculate_speed(
         start_time,
         end_time,
-        use_hmm=True,
-        hmm_shadow_mode=False,
         hmm_max_distance=40,
         hmm_sigma=25,
         hmm_beta=40,

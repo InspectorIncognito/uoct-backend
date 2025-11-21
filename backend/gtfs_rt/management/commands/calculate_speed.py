@@ -2,12 +2,12 @@ from datetime import datetime
 
 from django.core.management import BaseCommand, CommandError
 from gtfs_rt.config import TIMEZONE
-from gtfs_rt.processors.speed import calculate_speed
+from gtfs_rt.processors.speed_hmm import calculate_speed
 from rest_api.models import Segment, Shape
 
 
 class Command(BaseCommand):
-    help = "Calculate speed for all segments of each shape in a range of time."
+    help = "Calculate speed for all segments using HMM map matching."
 
     def add_arguments(self, parser):
         parser.add_argument(
@@ -19,16 +19,6 @@ class Command(BaseCommand):
             "--end_time",
             help="End time of the GPS pulses. Format: yyyy-mm-ddTHH:MM:SSZ",
             type=str,
-        )
-        parser.add_argument(
-            "--use-hmm",
-            action="store_true",
-            help="Use HMM map matching (active mode - replaces grid-based matching)",
-        )
-        parser.add_argument(
-            "--hmm-shadow",
-            action="store_true",
-            help="Run HMM in shadow mode (logs results but doesn't affect speed calculations)",
         )
         parser.add_argument(
             "--hmm-max-distance",
@@ -65,8 +55,6 @@ class Command(BaseCommand):
             raise Exception("No segments found")
 
         # Extract HMM parameters
-        use_hmm = options.get("use_hmm", False)
-        hmm_shadow_mode = options.get("hmm_shadow", False)
         hmm_max_distance = options.get("hmm_max_distance", 100.0)
         hmm_sigma = options.get("hmm_sigma", 25.0)
         hmm_beta = options.get("hmm_beta", 30.0)
@@ -74,8 +62,6 @@ class Command(BaseCommand):
         calculate_speed(
             start_time,
             end_time,
-            use_hmm=use_hmm,
-            hmm_shadow_mode=hmm_shadow_mode,
             hmm_max_distance=hmm_max_distance,
             hmm_sigma=hmm_sigma,
             hmm_beta=hmm_beta,
