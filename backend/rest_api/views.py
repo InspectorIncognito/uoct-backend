@@ -6,7 +6,7 @@ from django.db.models.functions import Round
 from django.http import JsonResponse, StreamingHttpResponse
 from django.utils import timezone
 from geojson import Feature, FeatureCollection, Point
-from gtfs_rt.processors.speed_hmm import calculate_speed
+from gtfs_rt.processors.speed import calculate_speed
 from gtfs_rt.utils import (
     get_last_temporal_range,
     get_last_temporal_segment,

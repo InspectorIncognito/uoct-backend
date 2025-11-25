@@ -10,21 +10,25 @@ class VehicleData:
         self.grid_manager = grid_manager
         self.expeditions = dict()
         self.license_plate = license_plate
+        self.exp_plate_route_ids = dict()
 
-    def add_gps_pulse(
-        self, gps_point: GPS, route_id: str, license_plate: str
-    ):  
+    def add_gps_pulse(self, gps_point: GPS, route_id: str, license_plate: str):
         # TODO: ver si es necesario crear nuevas expediciones si hay gaps de tiempo grandes.
-        new_exp = ExpeditionData(
-            self.grid_manager,
-            route_id,
-            timestamp=gps_point.timestamp,
-            license_plate=license_plate,
-        )
-        if new_exp not in self.expeditions:
+        # TODO: Actualizar a nuevo hash de expedicion, ahora se crea cada vez que se crea una
+        # nueva expedicion
+        if (license_plate, route_id) not in self.exp_plate_route_ids:
+            new_exp = ExpeditionData(
+                self.grid_manager,
+                route_id,
+                timestamp=gps_point.timestamp,
+                license_plate=license_plate,
+            )
+            self.exp_plate_route_ids[(license_plate, route_id)] = new_exp
             self.expeditions[new_exp] = new_exp
         else:
-            new_exp = self.expeditions[new_exp]
+            new_exp = self.expeditions[
+                self.exp_plate_route_ids[(license_plate, route_id)]
+            ]
         new_exp.add_gps_point(gps_point)
 
     def __eq__(self, other):
@@ -72,9 +76,7 @@ class VehicleManager:
                 timestamp=timestamp,
                 direction=direction,
             )
-            self.vehicles[vehicle_data].add_gps_pulse(
-                gps_obj, route_id, license_plate
-            )
+            self.vehicles[vehicle_data].add_gps_pulse(gps_obj, route_id, license_plate)
         except ValueError as e:
             pass
             # print(e)
@@ -92,7 +94,7 @@ class VehicleManager:
                     records.extend(exp_records)
                 except ValueError as e:
                     expeditions_ignored.append(str(expedition))
-                    # print(e)
+                    print(e)
         print("Total expeditions:", total_expeditions)
         print("Expeditions ignored:", len(expeditions_ignored))
         return records

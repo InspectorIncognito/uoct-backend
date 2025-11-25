@@ -77,7 +77,7 @@ def precompute_direction_cache(
         segments_by_direction[dir_id] = dir_segments
 
     # Build reverse mapping
-    for seg_pk in segment_pk_list:  
+    for seg_pk in segment_pk_list:
         segment_to_direction[seg_pk] = dir_id
 
         # Build unified geometry
@@ -209,7 +209,7 @@ def build_spatial_index(
 
     densified_coords = []
     segment_ids = []
-    #NOTE: use segment.pk no enumerate for the idx
+    # NOTE: use segment.pk no enumerate for the idx
     for idx, geom in zip(segments_gdf.segment_pk, segments_gdf.geometry):
         if geom is None:
             continue
@@ -331,8 +331,8 @@ def shortest_path_distance(
     dir1 = direction_cache.segment_to_direction.get(segment_idx1)
     dir2 = direction_cache.segment_to_direction.get(segment_idx2)
 
-    if dir1 is None or dir2 is None or dir1 != dir2:
-        return 1e7  # Cross-direction penalty
+    # if dir1 is None or dir2 is None or dir1 != dir2:
+    #     return 1e7  # Cross-direction penalty
 
     try:
         unified_line = direction_cache.unified_lines[dir1]
@@ -390,7 +390,18 @@ def viterbi(
     sigma_bearing: float = 30.0,
     bearing_weight_factor: float = 0.5,
 ) -> Tuple[List[Optional[int]], List[int], List[Optional[Point]]]:
-    """Viterbi algorithm for HMM map matching - OPTIMIZED."""
+    """Viterbi algorithm for HMM map matching - OPTIMIZED.
+
+    Returns
+    -------
+    matched_segments : List[Optional[int]]
+        List of length len(gps_trajectory) with segment PKs for matched points, None for unmatched.
+    valid_indices : List[int]
+        List of ORIGINAL GPS trajectory indices that have candidate segments.
+        Example: [0, 2, 5, 7] means GPS points at positions 0, 2, 5, 7 have matches.
+    projected_points : List[Optional[Point]]
+        List of length len(gps_trajectory) with projected points, None for unmatched.
+    """
     n_observations = len(gps_trajectory)
     # debug log removed
     if n_observations == 0:

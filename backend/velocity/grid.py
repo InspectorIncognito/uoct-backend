@@ -1,7 +1,12 @@
+from __future__ import annotations
+
 import math
-from typing import Dict, List, Optional, Tuple
+import traceback
+from collections import Counter
+from typing import TYPE_CHECKING, Dict, List, Optional, Tuple
 
 import geopandas as gpd
+import pandas as pd
 from django.utils import timezone
 from geojson import Feature
 from geojson import Point as GeoPoint
@@ -10,11 +15,14 @@ from gtfs_rt.services import get_gps_data_from_last_15_minutes
 from processors.geometry.line import PolylineSegment
 from processors.geometry.point import Point
 from rest_api.models import Segment
+from rest_api.util.hmm.hmm import haversine_distance, viterbi
 from rest_api.util.shape import ShapeManager
-from velocity.vehicle import VehicleManager
 from shapely.geometry import LineString as shp_LineString
+from shapely.geometry import Point as shp_Point
+from velocity.expedition import ExpeditionData
 
-from backend.rest_api.util.hmm.hmm import viterbi
+if TYPE_CHECKING:
+    from velocity.vehicle import VehicleManager
 
 DISTANCE_THRESHOLD = 25  # meters
 
@@ -287,7 +295,7 @@ class GridManager(Dict[Tuple[int, int], GridCell]):
         shape_id: str,
         previous_distance=None,
         threshold=DISTANCE_THRESHOLD,
-    ) -> Tuple[float, float] or None:
+    ) -> Optional[Tuple[float, float]]:
         segments = set()
         lat_index, lon_index = self.get_cell_indexes_from_point(
             point.latitude, point.longitude
@@ -364,7 +372,7 @@ class GridManager(Dict[Tuple[int, int], GridCell]):
         segments: List[PolylineSegment],
         distance_threshold,
         previous_distance=None,
-    ) -> Tuple[float, float] or None:
+    ) -> Optional[Tuple[float, float]]:
         closest_distance = math.inf
         closest_on_route_distance = math.inf
 
@@ -381,6 +389,216 @@ class GridManager(Dict[Tuple[int, int], GridCell]):
         else:
             return None, None
 
+    # TODO: Si actualizo la lista de GPS points, pero utilizo los índices viejos, puede fallar.
+    # Hay que arreglar ese error
+    @staticmethod
+    def _determine_shape_pk_from_matched_segments(
+        expedition,
+        vehicle_data,
+        matched_segments: List[Optional[int]],
+        valid_indices: List[int],
+        projected_points: List[Optional[shp_Point]],
+        segments_gdf: gpd.GeoDataFrame,
+    ) -> Optional[
+        Dict[str, Tuple[List[Optional[int]], List[int], List[Optional[shp_Point]]]]
+    ]:
+        """
+        Determina el shape_pk de los segmentos matcheados. Si hay más de un shape_pk,
+        crea una expedición por cada shape_pk.
+
+        Parameters
+        ----------
+        matched_segments : List[Optional[int]]
+            Lista de segment PKs de longitud igual al número de GPS points.
+        valid_indices : List[int]
+            Índices ORIGINALES de GPS points que tienen match.
+        segments_gdf : gpd.GeoDataFrame
+            GeoDataFrame con información de segmentos.
+
+        Returns
+        -------
+        int or None
+            Diccionario con expediciones como llaves y tuplas (expedición, segmentos_matcheados, puntos_proyectados) como valores.
+        """
+        shape_pks = dict()
+        for idx in valid_indices:
+            seg_pk = matched_segments[idx]
+            if seg_pk is not None:
+                row = segments_gdf[segments_gdf.segment_pk == seg_pk]
+                if not row.empty:
+                    shape_pk = row.iloc[0]["shape_pk"]
+                    if shape_pk not in shape_pks:
+                        shape_pks[shape_pk] = ([], [])
+                    shape_pks[shape_pk][0].append(idx)
+                    shape_pks[shape_pk][1].append(seg_pk)
+
+        if not shape_pks:
+            return None
+
+        if len(shape_pks) == 1:
+            expedition.shape_id = next(iter(shape_pks))
+            return {
+                expedition: (
+                    expedition,
+                    valid_indices,
+                    matched_segments,
+                    projected_points,
+                )
+            }
+        vehicle_data.expeditions.pop(expedition)
+        new_set = {}
+        for shape_pk, (idxs, seg_pks) in shape_pks.items():
+            print(
+                f"Creating new expedition for shape_pk {shape_pk} with {len(idxs)} GPS points."
+            )
+            expedition_copy = ExpeditionData(
+                grid_manager=expedition.grid_manager,
+                route_id=expedition.route_id,
+                timestamp=expedition.timestamp,
+                license_plate=expedition.license_plate,
+            )
+            expedition_copy.shape_id = shape_pk
+            expedition_copy.gps_points = expedition.gps_points
+            matched_segments_copy = [None] * len(matched_segments)
+            projected_points_copy = [None] * len(projected_points)
+            for idx in idxs:  # idxs contiene solo los índices de este shape_pk
+                matched_segments_copy[idx] = matched_segments[idx]
+                projected_points_copy[idx] = projected_points[idx]
+            vehicle_data.expeditions[expedition_copy] = expedition_copy
+            new_set[expedition_copy] = (
+                expedition_copy,
+                idxs,
+                matched_segments_copy,
+                projected_points_copy,
+            )
+
+        return new_set
+
+    @staticmethod
+    def _calculate_cumulative_distance(
+        segment_pk: int, projected_point: shp_Point, segments_gdf: gpd.GeoDataFrame
+    ) -> Optional[float]:
+        """
+        Calcula la distancia acumulada desde el inicio de la ruta hasta el punto proyectado.
+
+        Parameters
+        ----------
+        segment_pk : int
+            PK del segmento.
+        projected_point : shp_Point
+            Punto proyectado en el segmento.
+        segments_gdf : gpd.GeoDataFrame
+            GeoDataFrame con información de segmentos.
+
+        Returns
+        -------
+        float or None
+            Distancia acumulada o None si no se encuentra el segmento.
+        """
+        segment_row = segments_gdf[segments_gdf.segment_pk == segment_pk]
+        if segment_row.empty:
+            return None
+
+        segment_row = segment_row.iloc[0]
+        distance_to_segment_start = segment_row.get("distance_start", 0)
+        segment_geom = segment_row.geometry
+        distance_along_segment = segment_geom.project(projected_point)
+
+        return distance_to_segment_start + distance_along_segment
+
+    @staticmethod
+    def _validate_matched_gps_points(expedition):
+        """
+        Valida que haya suficientes puntos GPS matcheados para calcular velocidades.
+        No interpola - los puntos sin match permanecen como None y serán descartados.
+
+        Parameters
+        ----------
+        expedition : ExpeditionData
+            Expedición con gps_distance_on_route a validar.
+        """
+        distances = expedition.gps_distance_on_route
+        n = len(distances)
+
+        if n == 0:
+            return
+
+        if n != len(expedition.gps_points):
+            raise ValueError(
+                f"Length mismatch in {expedition}: distances ({n}) != gps_points ({len(expedition.gps_points)})"
+            )
+
+        valid_count = sum(1 for d in distances if d is not None)
+
+        if valid_count < 2:
+            raise ValueError(
+                f"Expedition {expedition} has less than 2 valid GPS points matched by HMM. "
+                f"Cannot calculate speed with {valid_count} matched points (need at least 2)."
+            )
+
+        # No interpolar - los valores None se quedan como None y serán descartados en calculate_speed
+
+    def _update_expedition_from_hmm_results(
+        self,
+        expedition,
+        matched_segments: List[Optional[int]],
+        valid_indices: List[int],
+        projected_points: List[Optional[shp_Point]],
+        segments_gdf: gpd.GeoDataFrame,
+    ):
+        """
+        Actualiza la expedición con los resultados del HMM.
+
+        Parameters
+        ----------
+        expedition : ExpeditionData
+            Expedición a actualizar.
+        matched_segments : List[Optional[int]]
+            Lista de segment PKs de longitud igual a len(expedition.gps_points).
+        valid_indices : List[int]
+            Lista de índices ORIGINALES de GPS que tienen match.
+        projected_points : List[Optional[shp_Point]]
+            Lista de puntos proyectados, misma longitud que matched_segments.
+        segments_gdf : gpd.GeoDataFrame
+            GeoDataFrame con información de segmentos.
+        """
+
+        # Inicializar listas si están vacías
+        if not expedition.gps_distance_on_route:
+            expedition.gps_distance_on_route = [None] * len(expedition.gps_points)
+        if not expedition.gps_distance_to_route:
+            expedition.gps_distance_to_route = [None] * len(expedition.gps_points)
+
+        # Llenar con proyecciones del HMM
+        for idx in valid_indices:
+            segment_pk = matched_segments[idx]
+            projected_point = projected_points[idx]
+
+            if segment_pk is not None and projected_point is not None:
+                try:
+                    # Calcular distancia acumulada en la ruta
+                    distance_on_route = self._calculate_cumulative_distance(
+                        segment_pk, projected_point, segments_gdf
+                    )
+                    if distance_on_route is not None:
+                        expedition.gps_distance_on_route[idx] = distance_on_route
+
+                        # Distancia perpendicular
+                        gps_point = expedition.gps_points[idx]
+                        distance_to_route = haversine_distance(
+                            gps_point.latitude,
+                            gps_point.longitude,
+                            projected_point.y,
+                            projected_point.x,
+                        )
+                        expedition.gps_distance_to_route[idx] = distance_to_route
+                except Exception as e:
+                    print(f"Error processing GPS point {idx}: {e}")
+                    continue
+
+        # Validar que haya suficientes puntos matcheados (no interpolar)
+        # self._validate_matched_gps_points(expedition)
+
     def run_hmm_map_matching(
         self,
         vm: VehicleManager,
@@ -389,29 +607,69 @@ class GridManager(Dict[Tuple[int, int], GridCell]):
         beta: float = 40,
         min_candidates: int = 2,
         sigma_bearing: float = 40,
-        bearing_weight_factor: float = 0.5,
+        bearing_weight_factor: float = 0.8,
     ):
         segments_gdfs: Dict[str, gpd.GeoDataFrame] = (
             self.shape_manager.get_segments_gdf()
         )
-        # Preculate shapes caches
+
+        # Add cumulative distance column to each segments_gdf
+        for axis_id, gdf in segments_gdfs.items():
+            if not gdf.empty and "distance_start" not in gdf.columns:
+                # Group by shape_id and calculate cumulative distance
+                gdf_with_distance = []
+                for shape_id in gdf["shape_id"].unique():
+                    shape_segments = gdf[gdf["shape_id"] == shape_id].copy()
+                    shape_segments = shape_segments.sort_values("sequence")
+
+                    # Calculate cumulative distance using actual segment distances
+                    cumulative_dist = 0
+                    distances_start = []
+                    for idx, row in shape_segments.iterrows():
+                        distances_start.append(cumulative_dist)
+                        # Calculate actual distance for this segment using haversine
+                        coords = list(row.geometry.coords)
+                        segment_distance = 0
+                        for i in range(len(coords) - 1):
+                            lon1, lat1 = coords[i]
+                            lon2, lat2 = coords[i + 1]
+                            from rest_api.util.hmm.hmm import haversine_distance
+
+                            segment_distance += haversine_distance(
+                                lat1, lon1, lat2, lon2
+                            )
+                        cumulative_dist += segment_distance
+
+                    shape_segments["distance_start"] = distances_start
+                    gdf_with_distance.append(shape_segments)
+
+                if gdf_with_distance:
+                    segments_gdfs[axis_id] = pd.concat(
+                        gdf_with_distance, ignore_index=True
+                    )
+
+        # Precalculate shapes caches
         # TODO: Change spatial idx to use segment.pk or similar
         # NOTE: now shapes_cache method return the segment pk for the segment ids
         self.shape_manager.shapes_cache(segments_gdfs=segments_gdfs)
 
         batch_results: Dict[
-            str, Dict[str, Tuple[List[Optional[int]], List[int], List[Optional[Point]]]]
+            str,
+            Dict[str, Tuple[List[Optional[int]], List[int], List[Optional[shp_Point]]]],
         ] = {}
-        for vehicle_data in vm.vehicles.values():
-            for expedition in vehicle_data.expeditions.values():
+        vehicle_data_values = list(vm.vehicles.values())
+        for vehicle_data in vehicle_data_values:
+            expeditions = list(vehicle_data.expeditions.values())
+            for expedition in expeditions:
                 trajectory = [
-                    (gps_point.latitude, gps_point.longitude)
+                    shp_Point(gps_point.longitude, gps_point.latitude)
                     for gps_point in expedition.gps_points
                 ]
                 bearings = [gps_point.bearing for gps_point in expedition.gps_points]
                 excluded_indices = set()
                 per_traj_results: Dict[
-                    str, Tuple[List[Optional[int]], List[int], List[Optional[Point]]]
+                    str,
+                    Tuple[List[Optional[int]], List[int], List[Optional[shp_Point]]],
                 ] = {}
                 for axis_id in segments_gdfs.keys():
                     # TODO: use proper indentifiers for segments. Right now, we are using the index in the GeoDataFrame, wich is not stable.
@@ -431,14 +689,43 @@ class GridManager(Dict[Tuple[int, int], GridCell]):
                         bearing_weight_factor=bearing_weight_factor,
                     )
                     if valid_indices:
-                        per_traj_results[axis_id] = (
-                            matched_segments,
-                            valid_indices,
-                            projected_points,
-                        )
-                        excluded_indices.update(valid_indices)
+                        # Actualizar la expedición directamente con los resultados
+                        try:
+                            new_set = self._determine_shape_pk_from_matched_segments(
+                                expedition,
+                                vehicle_data,
+                                matched_segments,
+                                valid_indices,
+                                projected_points,
+                                segments_gdfs[axis_id],
+                            )
+                            if new_set is None:
+                                continue
+                            for (
+                                expedition,
+                                valid_id,
+                                matched_seg,
+                                proj_points,
+                            ) in new_set.values():
+                                self._update_expedition_from_hmm_results(
+                                    expedition,
+                                    matched_seg,
+                                    valid_id,
+                                    proj_points,
+                                    segments_gdfs[axis_id],
+                                )
+                                # Solo excluir índices si la actualización fue exitosa
+                                excluded_indices.update(valid_id)
+                            # Una vez procesada exitosamente, no intentar otros ejes
+                            break
+                        except Exception as e:
+                            print(
+                                f"Error processing {expedition} for axis {axis_id}: {e}"
+                            )
+                            tb = traceback.format_exc()
+                            print(tb)
+                            continue
 
-                batch_results[str(expedition)] = per_traj_results
-        return batch_results
-    
-    
+        print(
+            f"HMM map matching completed. Processed expeditions from {len(vm.vehicles)} vehicles."
+        )

@@ -1,10 +1,13 @@
+from __future__ import annotations
+
+import uuid
 from datetime import datetime
+from typing import TYPE_CHECKING
 from zoneinfo import ZoneInfo
 
 from django.utils.timezone import get_current_timezone
 from geopandas import GeoDataFrame
 from velocity.gps import GPSPulse as GPS
-from velocity.grid import GridManager
 from velocity.segment import (
     PartialSpatialSegment,
     PartialTemporalSegment,
@@ -12,6 +15,9 @@ from velocity.segment import (
     SpatialSegment,
     TemporalSegment,
 )
+
+if TYPE_CHECKING:
+    from velocity.grid import GridManager
 
 
 # TODO: Add vehicle license plate if necessary
@@ -25,6 +31,7 @@ class ExpeditionData:
         timestamp: datetime,
         license_plate: str,
     ):
+        self.id = uuid.uuid4()
         self.grid_manager = grid_manager
 
         self.license_plate = license_plate
@@ -60,10 +67,29 @@ class ExpeditionData:
         speed_data = []
         if len(self.gps_points) < 2:
             raise ValueError(f"{self} has {len(self.gps_points)} gps points.")
+
+        # Validar que gps_distance_on_route esté inicializada y tenga valores
+        if not self.gps_distance_on_route or len(self.gps_distance_on_route) != len(
+            self.gps_points
+        ):
+            raise ValueError(
+                f"{self} does not have distance_on_route calculated. "
+                f"Expected {len(self.gps_points)} distances, got {len(self.gps_distance_on_route) if self.gps_distance_on_route else 0}."
+            )
+
+        # Contador de puntos descartados por falta de proyección HMM
+        skipped_no_projection = 0
+
         for index, gps_pulse in enumerate(self.gps_points[1:], start=1):
             previous_gps_pulse = self.gps_points[index - 1]
             previous_distance = self.gps_distance_on_route[index - 1]
             current_distance = self.gps_distance_on_route[index]
+
+            # Descartar pulsos GPS que no fueron matcheados por el HMM
+            # Estos tienen None en gps_distance_on_route
+            if previous_distance is None or current_distance is None:
+                skipped_no_projection += 1
+                continue
 
             # calculate distance and time difference
             delta_time = (
@@ -169,6 +195,19 @@ class ExpeditionData:
                         )
                         speed_data.append(speed_row)
                     aux_start_distance += i_delta_dist
+
+        # Log información sobre puntos descartados
+        if skipped_no_projection > 0:
+            total_segments = len(self.gps_points) - 1
+            matched_percentage = (
+                ((total_segments - skipped_no_projection) / total_segments * 100)
+                if total_segments > 0
+                else 0
+            )
+            print(
+                f"{self}: Discarded {skipped_no_projection}/{total_segments} GPS segments without HMM projection ({matched_percentage:.1f}% matched)"
+            )
+
         return speed_data
 
     def __format_speed_data_row(
@@ -213,13 +252,10 @@ class ExpeditionData:
         return row
 
     def __eq__(self, other):
-        return (
-            self.license_plate == other.license_plate
-            and self.route_id == other.route_id
-        )
+        return isinstance(other, ExpeditionData) and self.id == other.id
 
     def __hash__(self):
-        return hash((self.license_plate, self.route_id))
+        return hash(self.id)
 
     def __str__(self):
         route = self.route_id if self.route_id else "Unknown"

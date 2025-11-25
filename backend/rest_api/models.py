@@ -36,6 +36,7 @@ class Shape(models.Model):
                 {
                     "segment_pk": segment.pk,
                     "shape_id": self.name,
+                    "shape_pk": str(self.pk),
                     "segment_id": segment.segment_id,
                     "direction": segment.direction,
                     "bearing": segment.bearing,

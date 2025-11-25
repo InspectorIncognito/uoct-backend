@@ -2,7 +2,7 @@ from datetime import datetime
 
 from django.core.management import BaseCommand, CommandError
 from gtfs_rt.config import TIMEZONE
-from gtfs_rt.processors.speed_hmm import calculate_speed
+from gtfs_rt.processors.speed import calculate_speed
 from rest_api.models import Segment, Shape
 
 
@@ -62,7 +62,4 @@ class Command(BaseCommand):
         calculate_speed(
             start_time,
             end_time,
-            hmm_max_distance=hmm_max_distance,
-            hmm_sigma=hmm_sigma,
-            hmm_beta=hmm_beta,
         )

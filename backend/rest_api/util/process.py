@@ -1,4 +1,4 @@
-from gtfs_rt.processors.speed_hmm import calculate_speed
+from gtfs_rt.processors.speed import calculate_speed
 from gtfs_rt.utils import get_last_temporal_range
 from rest_api.util.alert import TranSappSiteManager, create_alerts, update_alerts
 

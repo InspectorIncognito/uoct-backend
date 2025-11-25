@@ -1,15 +1,19 @@
+from __future__ import annotations
+
 import datetime
 import logging
 import math
 from bisect import bisect_right
 from collections import defaultdict
-from typing import List
+from typing import TYPE_CHECKING, List
 
 import pytz
 from django.utils.timezone import get_current_timezone
 from processors.geometry.point import Point
 from rest_api.util.shape import ShapeManager
-from velocity.grid import GridManager
+
+if TYPE_CHECKING:
+    from velocity.grid import GridManager
 
 logger = logging.getLogger(__name__)
 
