@@ -1,4 +1,5 @@
 import json
+import time
 from typing import Dict, List, Optional, Tuple
 
 import geopandas as gpd
@@ -213,7 +214,7 @@ def assign_routes_to_segments(
     print(f"Prepared {len(shapes_trajectories)} GTFS trajectories for matching")
 
     # 3) Construir GDF de segmentos por axis (concatenando direcciones del mismo eje)
-    axis_segments = load_segments_per_axis(shape_manager)
+    axis_segments = shape_manager.get_segments_gdf()
     print(f"Prepared {len(axis_segments)} axes for matching")
     total_segments = sum(len(gdf) for gdf in axis_segments.values() if gdf is not None)
     print(f"Total segments available across axes: {total_segments}")
@@ -221,6 +222,7 @@ def assign_routes_to_segments(
     #  -> revisar que todo funcione bien con este cambio
     # 4) Ejecutar el emparejamiento HMM en batch
     print(f"Running batch HMM matching on {len(shapes_trajectories)} trajectories")
+    start_time = time.time()
     batch_results = match_shapes_to_axes(
         shapes_trajectories,
         axis_segments,
@@ -230,7 +232,10 @@ def assign_routes_to_segments(
         bearing_weight_factor=bearing_weight_factor,
         sigma_bearing=sigma_bearing,
     )
-    print(f"Batch matching completed: matched trajectories={len(batch_results)}")
+    end_time = time.time()
+    print(
+        f"Batch matching completed: matched trajectories={len(batch_results)} in {end_time - start_time:.2f} seconds"
+    )
 
     # 5) Mapa shape_id -> route_id para recuperar la ruta de cada shape
     #    (shapes_trajectories ya trae route_id por shape_id)
@@ -242,8 +247,10 @@ def assign_routes_to_segments(
     )
 
     # 6) Agregar por segmento todas las rutas observadas
-    #    matched_segment_index es índice de fila en el GDF de ese axis.
+    #    matched_segments ya contiene los segment_pk (UUIDs) directamente
     routes_per_segment: Dict[str, set] = {}
+    # Para validar que haya al menos 2 matches con el mismo shape (eje + dirección)
+    matches_per_route_and_shape: Dict[Tuple[str, str], int] = {}
 
     for shape_id, axis_map in batch_results.items():
         route_data = route_direction_by_shape.get(shape_id)
@@ -252,50 +259,78 @@ def assign_routes_to_segments(
 
         route_id = route_data.get("route_id")
         direction = route_data.get("direction")
-        print(
-            f"Processing shape_id={shape_id} with route_id={route_id} direction={direction}"
-        )
 
         if route_id is None or (isinstance(route_id, float) and pd.isna(route_id)):
-            continue  # sin route_id, no se agrega servicio
+            continue
 
-        # Agregar sufijo de dirección: 0 -> "I", 1 -> "R"
+        # Agregar sufijo de dirección
         if direction == 0 or direction == "0":
             route_id_with_direction = f"{route_id}I"
         elif direction == 1 or direction == "1":
             route_id_with_direction = f"{route_id}R"
         else:
-            # Si direction es None o inválido, guardar sin sufijo
             route_id_with_direction = str(route_id)
+
+        # Obtener bearings de la ruta
+        route_row = shapes_trajectories[
+            shapes_trajectories["shape_id"] == shape_id
+        ].iloc[0]
+        route_bearings = route_row.get("bearings", [])
 
         for axis_id, (
             matched_segments,
             valid_indices,
             _projected_points,
         ) in axis_map.items():
+            if len(valid_indices) < 2:
+                continue
             gdf = axis_segments.get(axis_id)
             if gdf is None or gdf.empty:
                 continue
 
+            # NUEVA VALIDACIÓN: Alineación de bearings
+            segment_bearings = []
+            valid_segment_uuids = []
+            shape_pk = None
+
             for idx in valid_indices:
-                seg_idx = matched_segments[idx]
-                if seg_idx is None:
+                seg_uuid = matched_segments[idx]
+                if seg_uuid is None:
                     continue
+
                 try:
-                    row = gdf.iloc[int(seg_idx)]
-                except Exception:
+                    row = gdf[gdf["segment_pk"] == seg_uuid].iloc[0]
+                    shape_pk = row.get("shape_pk")
+
+                    if shape_pk is None or (
+                        isinstance(shape_pk, float) and pd.isna(shape_pk)
+                    ):
+                        continue
+
+                    # Extraer bearing del segmento (si está disponible)
+                    seg_bearing = row.get("bearing", None)
+                    if seg_bearing is not None:
+                        segment_bearings.append(seg_bearing)
+                    route_bearing = route_bearings[idx]
+                    print(
+                        f"Segment bearing: {seg_bearing}, route bearing: {route_bearing}"
+                    )
+                    if route_bearing is None or seg_bearing is None:
+                        print("One of the bearings is None, skipping segment")
+                        continue
+                    if abs(seg_bearing - route_bearing) % 360 > 90:
+                        print("Bearing difference too high, skipping segment")
+                        continue
+                    valid_segment_uuids.append(seg_uuid)
+                except (IndexError, KeyError):
                     continue
 
-                # Se espera que el GDF tenga la columna 'segment_id' (UUID de Segment)
-                seg_uuid = row.get("segment_id")
-                if seg_uuid is None or (
-                    isinstance(seg_uuid, float) and pd.isna(seg_uuid)
-                ):
-                    continue
-
-                routes_per_segment.setdefault(str(seg_uuid), set()).add(
-                    route_id_with_direction
-                )
+            # Si pasa todas las validaciones, agregar las rutas
+            if len(valid_segment_uuids) >= 2:
+                for seg_uuid in valid_segment_uuids:
+                    routes_per_segment.setdefault(str(seg_uuid), set()).add(
+                        route_id_with_direction
+                    )
 
     print(f"Routes per segment found: {len(routes_per_segment)} segments")
 
