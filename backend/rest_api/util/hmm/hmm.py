@@ -114,6 +114,9 @@ def build_segment_cache(segments_gdf: gpd.GeoDataFrame) -> SegmentCache:
     bearings = {}
 
     has_bearing = "bearing" in segments_gdf.columns
+    print("=" * 60)
+    print(f"Building SegmentCache: has_bearing={has_bearing}")
+    print("=" * 60)
 
     # debug log removed
 
@@ -121,7 +124,7 @@ def build_segment_cache(segments_gdf: gpd.GeoDataFrame) -> SegmentCache:
         geometries[idx] = row.geometry
         if has_bearing:
             try:
-                raw_bearing = row["bearing"]
+                raw_bearing = getattr(row, "bearing", None)
                 bearings[idx] = (
                     normalize_bearing(float(raw_bearing))
                     if raw_bearing is not None
@@ -509,7 +512,7 @@ def viterbi(
                 )
 
                 if prev_direction != curr_direction:
-                    trans_log = np.log(1e-50)
+                    trans_log = np.log(0.01)
                 else:
                     trans_log = transition_prob_log(
                         prev_point,
