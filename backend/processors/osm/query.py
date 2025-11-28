@@ -123,6 +123,16 @@ way(r)
   [highway~"^(motorway|primary)"]
   [name~"(Autopista Vespucio Oriente|Avenida Ossa)"];"""
 
+INDEPENDENCIA_QUERY = """
+rel(1674530);
+map_to_area->.target_area;
+way(area.target_area)
+  [highway~"^(primary|secondary)$"]
+  [name~"^(Avenida Independencia)$"]
+  ->.filtered_ways;
+way(589714638) ->.extra_way;
+(.filtered_ways; .extra_way;);"""
+
 
 def get_axis_config(axis_name: str) -> dict:
     """

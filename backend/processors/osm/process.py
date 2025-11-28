@@ -4,12 +4,10 @@ import math
 import os
 from typing import Dict, List, Optional
 
-import geojson
 import geopandas as gpd
 import networkx as nx
 import pandas as pd
 from config.paths import FIXTURE_PATH
-from geojson.feature import Feature, FeatureCollection
 from haversine import Unit, haversine
 from networkx import Graph
 from processors.geometry.point import Point as p
@@ -18,6 +16,7 @@ from processors.geometry.utils import (
     linestring_distance,
 )
 from processors.osm.query import (  # VESPUCIO_NORTE_OVERPASS_QUERY,
+    INDEPENDENCIA_QUERY,
     VESPUCIO_ORIENTE_OVERPASS_QUERY,
     VESPUCIO_SUR_OVERPASS_QUERY,
     OSMDownloader,
@@ -25,7 +24,7 @@ from processors.osm.query import (  # VESPUCIO_NORTE_OVERPASS_QUERY,
 from pyproj.crs import CRS
 from rest_api.models import Axles, Segment, Shape
 from rest_api.util.shape import flush_shape_objects
-from shapely import Point, to_geojson
+from shapely import Point
 from shapely.geometry import LineString as shp_LineString
 from shapely.geometry import MultiLineString as shp_MultiLineString
 from shapely.geometry import Point as shp_Point
@@ -42,7 +41,7 @@ def split_axis_by_direction(
     ----------
     df : gpd.GeoDataFrame
         The input GeoDataFrame containing LineString geometries.
-    bearing_threshold : float, default 45.0
+    bearing_threshold : float, default 90.0
         Maximum difference in bearing (degrees) to consider geometries as same direction.
 
     Returns
@@ -113,9 +112,35 @@ def split_axis_by_direction(
     return result
 
 
+def _geodesic_bearing(lon1: float, lat1: float, lon2: float, lat2: float) -> float:
+    """Calcula el bearing geodésico entre dos puntos (lon, lat) en grados [0, 360)."""
+    lat1_r, lon1_r = math.radians(lat1), math.radians(lon1)
+    lat2_r, lon2_r = math.radians(lat2), math.radians(lon2)
+    dlon = lon2_r - lon1_r
+    y = math.sin(dlon) * math.cos(lat2_r)
+    x = math.cos(lat1_r) * math.sin(lat2_r) - math.sin(lat1_r) * math.cos(
+        lat2_r
+    ) * math.cos(dlon)
+    brng = math.degrees(math.atan2(y, x))
+    return (brng + 360) % 360
+
+
+def _haversine_distance(lon1: float, lat1: float, lon2: float, lat2: float) -> float:
+    """Calcula la distancia en metros entre dos puntos (lon, lat) usando Haversine."""
+    R = 6371000  # Radio de la Tierra en metros
+    lat1_r, lat2_r = math.radians(lat1), math.radians(lat2)
+    dlat = lat2_r - lat1_r
+    dlon = math.radians(lon2 - lon1)
+    a = (
+        math.sin(dlat / 2) ** 2
+        + math.cos(lat1_r) * math.cos(lat2_r) * math.sin(dlon / 2) ** 2
+    )
+    return R * 2 * math.atan2(math.sqrt(a), math.sqrt(1 - a))
+
+
 def calculate_bearing(geometry):
-    """Calcular el bearing ponderado de un LineString.
-    Usa todos los segmentos y pondera por la longitud.
+    """Calcular el bearing ponderado de un LineString usando fórmulas geodésicas.
+    Usa todos los segmentos y pondera por la longitud real en metros.
     Retorna bearing en grados (0-360)."""
     if not isinstance(geometry, shp_LineString) or len(geometry.coords) < 2:
         return None
@@ -125,16 +150,15 @@ def calculate_bearing(geometry):
     sum_cos = 0.0
     total_len = 0.0
 
-    for (x1, y1), (x2, y2) in zip(coords[:-1], coords[1:]):
-        dx = x2 - x1
-        dy = y2 - y1
-        seg_len = math.hypot(dx, dy)
+    for (lon1, lat1), (lon2, lat2) in zip(coords[:-1], coords[1:]):
+        seg_len = _haversine_distance(lon1, lat1, lon2, lat2)
         if seg_len == 0:
             continue
-        # bearing con 0° = norte, positivo en el sentido horario
-        ang_rad = math.atan2(dx, dy)
-        sum_sin += seg_len * math.sin(ang_rad)
-        sum_cos += seg_len * math.cos(ang_rad)
+        # Bearing geodésico correcto
+        bearing_deg = _geodesic_bearing(lon1, lat1, lon2, lat2)
+        bearing_rad = math.radians(bearing_deg)
+        sum_sin += seg_len * math.sin(bearing_rad)
+        sum_cos += seg_len * math.cos(bearing_rad)
         total_len += seg_len
 
     if total_len == 0:
@@ -163,12 +187,8 @@ def merge_lines_with_metadata(gdf: gpd.GeoDataFrame) -> gpd.GeoDataFrame:
     if gdf.empty:
         return gdf
 
-    # Find connected components (groups of touching lines)
-    import networkx as nx
-    from networkx import Graph
-
-    # Build connectivity graph
-    G = Graph()
+    # Build connectivity graph to find connected components
+    G = nx.Graph()
     for idx, geom in gdf.geometry.items():
         G.add_node(idx)
     for i, geom_i in gdf.geometry.items():
@@ -258,10 +278,15 @@ def filter_metadata(metadata: dict) -> dict:
     return {k: v for k, v in metadata.items() if k in keys_to_keep}
 
 
-def keep_main_axis_lines(gdf, tol=1e-6):
+def keep_main_axis_lines(gdf, tol=10.0):
     """
     Filtra un GeoDataFrame con una sola fila de tipo MultiLineString,
     eliminando líneas paralelas y ramas (salidas) que no corresponden al eje principal.
+
+    Parameters
+    ----------
+    tol : float
+        Tolerancia en metros para considerar dos puntos como conectados (default 10m).
     """
     if gdf.empty:
         return gdf
@@ -317,7 +342,7 @@ def keep_main_axis_lines(gdf, tol=1e-6):
     return result_gdf
 
 
-def remove_branches(lines, keep_idx, parallel_keep, tol=1e-6):
+def remove_branches(lines, keep_idx, parallel_keep, tol=10.0):
     """
     Detecta y elimina líneas que son ramas o salidas del eje principal.
     Una rama se define como una línea que comparte un extremo con otra línea,
@@ -325,12 +350,14 @@ def remove_branches(lines, keep_idx, parallel_keep, tol=1e-6):
 
     Parámetros
     ----------
-    gdf : gpd.GeoDataFrame
-        GeoDataFrame con las líneas a analizar.
+    lines : list
+        Lista de LineStrings a analizar.
     keep_idx : list
         Índices de las líneas que se mantienen (no paralelas).
+    parallel_keep : set
+        Índices de líneas paralelas que se mantienen.
     tol : float
-        Tolerancia en metros para considerar dos puntos como iguales.
+        Tolerancia en metros para considerar dos puntos como conectados (default 10m).
 
     Returns
     -------
@@ -719,6 +746,54 @@ def save_all_segmented_shapes_to_db(
         )
 
 
+def normalize_geometry_by_bearing(
+    gdf: gpd.GeoDataFrame, target_bearing: float
+) -> gpd.GeoDataFrame:
+    """
+    Normaliza todas las geometrías para que apunten en la dirección del target_bearing.
+    Usa el bearing ponderado de cada geometría para decidir si invertir.
+    """
+    gdf = gdf.copy()
+
+    for idx, row in gdf.iterrows():
+        geom = row.geometry
+
+        if isinstance(geom, shp_LineString):
+            current_bearing = calculate_bearing(geom)
+            if current_bearing is not None:
+                diff = min(
+                    abs(current_bearing - target_bearing),
+                    360 - abs(current_bearing - target_bearing),
+                )
+                if diff > 90:  # Está apuntando en dirección opuesta
+                    gdf.at[idx, "geometry"] = shp_LineString(list(geom.coords)[::-1])
+
+        elif isinstance(geom, shp_MultiLineString):
+            # Para MultiLineString, verificar la dirección general
+            lines = list(geom.geoms)
+            if lines:
+                # Usar el bearing de la primera y última coordenada del conjunto
+                first_coord = list(lines[0].coords)[0]
+                last_coord = list(lines[-1].coords)[-1]
+                temp_line = shp_LineString([first_coord, last_coord])
+                current_bearing = calculate_bearing(temp_line)
+
+                if current_bearing is not None:
+                    diff = min(
+                        abs(current_bearing - target_bearing),
+                        360 - abs(current_bearing - target_bearing),
+                    )
+                    if diff > 90:
+                        # Invertir todo el MultiLineString
+                        reversed_lines = [
+                            shp_LineString(list(line.coords)[::-1])
+                            for line in reversed(lines)
+                        ]
+                        gdf.at[idx, "geometry"] = shp_MultiLineString(reversed_lines)
+
+    return gdf
+
+
 # Funtion to process all the shape data from OSM
 def process_osm_queries(distance_threshold: float = 500.0, use_fixtures: bool = False):
     """Process all the queries in EJES_PRINCIPALES, downloading data from OSM Overpass API,
@@ -741,6 +816,8 @@ def process_osm_queries(distance_threshold: float = 500.0, use_fixtures: bool = 
                 query = VESPUCIO_SUR_OVERPASS_QUERY
             elif axle.name == "Eje Américo Vespucio Oriente":
                 query = VESPUCIO_ORIENTE_OVERPASS_QUERY
+            elif axle.name == "Eje Vespucio":
+                query = INDEPENDENCIA_QUERY
             else:
                 query = osm_downloader.build_overpass_query(
                     place=axis_config["city"],
@@ -764,29 +841,99 @@ def process_shape_data(
     print(f"\nProcessing axis: {axis_name} with {len(axis['features'])} features...")
     # Extract features with valid geometry
     query_data = gpd.GeoDataFrame.from_features(axis, crs="EPSG:4326")
+    # PASO 1: Calcular bearings originales
+    query_data["original_bearing"] = query_data.geometry.apply(calculate_bearing)
+
     splitted_gdf = split_axis_by_direction(query_data, bearing_threshold=94.0)
-    segmented_shapes = []
+
+    # PASO 2: Calcular bearing objetivo de cada grupo
+    group_bearings = []
     for i, group_gdf in enumerate(splitted_gdf):
+        bearings = []
+        lengths = []
+        for idx, row in group_gdf.iterrows():
+            b = row.get("original_bearing") or calculate_bearing(row.geometry)
+            if b is not None:
+                bearings.append(b)
+                geom_metric = gpd.GeoSeries([row.geometry], crs="EPSG:4326").to_crs(
+                    "EPSG:3857"
+                )[0]
+                lengths.append(geom_metric.length)
+
+        if bearings and lengths:
+            sum_sin = sum(
+                l * math.sin(math.radians(b)) for b, l in zip(bearings, lengths)
+            )
+            sum_cos = sum(
+                l * math.cos(math.radians(b)) for b, l in zip(bearings, lengths)
+            )
+            target_bearing = (math.degrees(math.atan2(sum_sin, sum_cos)) + 360) % 360
+            group_bearings.append(target_bearing)
+            print(f"Direction group {i}: target bearing = {target_bearing:.2f}°")
+        else:
+            group_bearings.append(None)
+
+    segmented_shapes = []
+
+    for i, group_gdf in enumerate(splitted_gdf):
+        target_bearing = group_bearings[i]
+        if target_bearing is None:
+            continue
+
+        # PASO 3: Normalizar geometrías ANTES de cualquier procesamiento
+        group_gdf = normalize_geometry_by_bearing(group_gdf, target_bearing)
+
+        # Verificar normalización
+        normalized_bearings = group_gdf.geometry.apply(calculate_bearing)
+        avg_normalized = normalized_bearings.mean()
+        print(
+            f"Group {i} - Bearing después de normalización: {avg_normalized:.2f}° (objetivo: {target_bearing:.2f}°)"
+        )
+
         group_gdf["direction_group"] = i
         group_gdf["group_size"] = len(group_gdf)
         group_gdf["eje_name"] = axis_name
+        group_gdf["target_bearing"] = target_bearing
+
         merged = merge_lines_with_metadata(group_gdf)
         print(f"Merged shape for direction group {i} has {len(merged)} lines.")
+
         one_road_gdf = keep_main_axis_lines(merged)
         print(f"One road shape for direction group {i} has {len(one_road_gdf)} lines.")
-        conected_gdf = connect_lines(one_road_gdf, max_distance_m=550.0)
+
+        conected_gdf = connect_lines(one_road_gdf, max_distance_m=510.0)
         print(f"Connected shape for direction group {i} has {len(conected_gdf)} lines.")
+
         filtered_gdf = filter_short_lines(conected_gdf)
         print(f"Filtered shape for direction group {i} has {len(filtered_gdf)} lines.")
-        print("=" * 50)
-        target_bearing = group_gdf["bearing"].mean()  # o la media del grupo
-        filtered_gdf["geometry"] = filtered_gdf.geometry.apply(
-            lambda g: orient_linestring_by_bearing(g, target_bearing)
+
+        # PASO 4: Verificar orientación final y corregir si es necesario
+        final_bearing = calculate_bearing(filtered_gdf.geometry.iloc[0])
+        bearing_diff = min(
+            abs(final_bearing - target_bearing),
+            360 - abs(final_bearing - target_bearing),
         )
+
+        if bearing_diff > 90:
+            print(
+                f"Corrigiendo orientación final: {final_bearing:.2f}° -> {target_bearing:.2f}°"
+            )
+            filtered_gdf["geometry"] = filtered_gdf.geometry.apply(
+                lambda g: orient_linestring_by_bearing(g, target_bearing)
+            )
+            final_bearing = calculate_bearing(filtered_gdf.geometry.iloc[0])
+
+        print(
+            f"Final bearing for group {i}: {final_bearing:.2f}° (target: {target_bearing:.2f}°)"
+        )
+        print("=" * 50)
+
         segmented = segment_shape_by_distance(
             filtered_gdf, distance_threshold, distance_algorithm="haversine"
         )
-        # Save segmented shapes to a geojson file for debugging
+
+        segmented["target_bearing"] = target_bearing
+
         file_path = "debug"
         if not os.path.exists(file_path):
             os.makedirs(file_path)
