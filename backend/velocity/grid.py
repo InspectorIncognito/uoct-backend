@@ -502,7 +502,29 @@ class GridManager(Dict[Tuple[int, int], GridCell]):
         segment_row = segment_row.iloc[0]
         distance_to_segment_start = segment_row.get("distance_start", 0)
         segment_geom = segment_row.geometry
-        distance_along_segment = segment_geom.project(projected_point)
+        coords = list(segment_geom.coords)
+        distance_along_segment = 0
+
+        for i in range(len(coords) - 1):
+            lon1, lat1 = coords[i]
+            lon2, lat2 = coords[i + 1]
+            point_on_segment = shp_Point(lon1, lat1)
+
+            # Si el punto proyectado está entre coord[i] y coord[i+1]
+            # calculamos la distancia hasta ese punto
+            if (
+                segment_geom.project(shp_Point(lon1, lat1))
+                <= segment_geom.project(projected_point)
+                <= segment_geom.project(shp_Point(lon2, lat2))
+            ):
+                # Distancia acumulada hasta coord[i]
+                distance_along_segment += haversine_distance(
+                    lat1, lon1, projected_point.y, projected_point.x
+                )
+                break
+            else:
+                # Sumar distancia completa del sub-segmento
+                distance_along_segment += haversine_distance(lat1, lon1, lat2, lon2)
 
         return distance_to_segment_start + distance_along_segment
 
@@ -607,7 +629,7 @@ class GridManager(Dict[Tuple[int, int], GridCell]):
         beta: float = 40,
         min_candidates: int = 2,
         sigma_bearing: float = 40,
-        bearing_weight_factor: float = 0.8,
+        bearing_weight_factor: float = 0.5,
     ):
         segments_gdfs: Dict[str, gpd.GeoDataFrame] = (
             self.shape_manager.get_segments_gdf()
@@ -658,6 +680,7 @@ class GridManager(Dict[Tuple[int, int], GridCell]):
             Dict[str, Tuple[List[Optional[int]], List[int], List[Optional[shp_Point]]]],
         ] = {}
         vehicle_data_values = list(vm.vehicles.values())
+        segments_cnt = set()
         for vehicle_data in vehicle_data_values:
             expeditions = list(vehicle_data.expeditions.values())
             for expedition in expeditions:
@@ -688,6 +711,11 @@ class GridManager(Dict[Tuple[int, int], GridCell]):
                         sigma_bearing=sigma_bearing,
                         bearing_weight_factor=bearing_weight_factor,
                     )
+                    segments_cnt.update(
+                        matched_seg
+                        for matched_seg in matched_segments
+                        if matched_seg is not None
+                    )
                     if valid_indices:
                         # Actualizar la expedición directamente con los resultados
                         try:
@@ -716,8 +744,7 @@ class GridManager(Dict[Tuple[int, int], GridCell]):
                                 )
                                 # Solo excluir índices si la actualización fue exitosa
                                 excluded_indices.update(valid_id)
-                            # Una vez procesada exitosamente, no intentar otros ejes
-                            break
+                            # Continuar procesando otros ejes para permitir matches en múltiples ejes
                         except Exception as e:
                             print(
                                 f"Error processing {expedition} for axis {axis_id}: {e}"
@@ -726,6 +753,21 @@ class GridManager(Dict[Tuple[int, int], GridCell]):
                             print(tb)
                             continue
 
+        # Estadísticas de matching por shape_id
+        shape_stats = {}
+        for vehicle_data in vehicle_data_values:
+            for expedition in vehicle_data.expeditions.values():
+                if expedition.shape_id is not None:
+                    shape_stats[expedition.shape_id] = (
+                        shape_stats.get(expedition.shape_id, 0) + 1
+                    )
+
         print(
             f"HMM map matching completed. Processed expeditions from {len(vm.vehicles)} vehicles."
         )
+        print(f"Unique matched segments: {len(segments_cnt)}")
+        print(f"Expeditions per shape_id:")
+        for shape_id, count in sorted(
+            shape_stats.items(), key=lambda x: x[1], reverse=True
+        ):
+            print(f"  - {shape_id}: {count} expeditions")
