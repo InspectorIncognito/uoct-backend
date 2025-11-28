@@ -42,7 +42,9 @@ class GTFSRTManager:
     def download_raw_gtfs_rt_data(self):
         response = requests.get(self.url)
         return response.content
-
+    # TODO: Review this method to be sure that duplicated data is not stored in DB.
+    # Fix the logic to compare timestamps correctly.
+    # Use UTC timezone for timestamp comparison.
     def save_gtfs_rt_to_db(self, feed: gtfs_realtime_pb2.FeedMessage):
         current_timestamp = self.get_timestamp_from_feed(feed)
         if current_timestamp:
@@ -60,23 +62,28 @@ class GTFSRTManager:
             if entity.HasField("vehicle"):
                 v = entity.vehicle
                 if v.HasField("vehicle"):
-                    if v.HasField("trip") and v.HasField("vehicle"):
-                        timestamp = v.timestamp
-                        route_id = v.trip.route_id
-                        direction = v.trip.direction_id
-                        license_plate = v.vehicle.license_plate
-                        gps = v.position
-                        GPSPulse.objects.create(
-                            route_id=route_id,
-                            direction=direction,
-                            latitude=gps.latitude,
-                            longitude=gps.longitude,
-                            bearing=gps.bearing,
-                            license_plate=license_plate,
-                            timestamp=datetime.datetime.fromtimestamp(
-                                timestamp
-                            ).astimezone(timezone.get_current_timezone()),
-                        )
+                    timestamp = v.timestamp
+                    route_id = (
+                        v.trip.route_id if v.trip.HasField("route_id") else None
+                    )
+                    direction = (
+                        v.trip.direction_id
+                        if v.trip.HasField("direction_id")
+                        else None
+                    )
+                    license_plate = v.vehicle.license_plate
+                    gps = v.position
+                    GPSPulse.objects.create(
+                        route_id=route_id,
+                        direction=direction,
+                        latitude=gps.latitude,
+                        longitude=gps.longitude,
+                        bearing=gps.bearing,
+                        license_plate=license_plate,
+                        timestamp=datetime.datetime.fromtimestamp(
+                            timestamp
+                        ).astimezone(timezone.get_current_timezone()),
+                    )
 
     def run_process(self):
         raw_data = self.download_raw_gtfs_rt_data()
@@ -114,7 +121,9 @@ class GTFSRTManager:
             return
         self.__update_previous_timestamp(timestamp)
         self.save_gtfs_rt_to_db(feed)
-
+    # TODO: Review this method to be sure to run correctly in cron jobs and collect all data, 
+    # Be careful with license plates that can be repeated in different vehicles. We need to discard the ones
+    # that are to far of the axis.
     def run_process_cron(self):
         raw_data = self.download_raw_gtfs_rt_data()
         feed = self.read_proto_raw_content(raw_data)
