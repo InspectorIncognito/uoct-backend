@@ -1,8 +1,7 @@
-from rest_api.models import Segment, Services, Stop
-from geojson import FeatureCollection
 import geopandas as gpd
 import pandas as pd
-from geojson import Point, LineString, Feature, FeatureCollection
+from geojson import Feature, FeatureCollection, LineString, Point
+from rest_api.models import Segment, Services, Stop
 
 
 class SegmentManager:
@@ -13,46 +12,108 @@ class SegmentManager:
         segments = []
         for segment in self.segments:
             segments.append(
-                Feature(geometry=LineString(coordinates=segment.geometry), properties={"segment_pk": segment.pk})
+                Feature(
+                    geometry=LineString(coordinates=segment.geometry),
+                    properties={"segment_pk": segment.pk},
+                )
             )
         segments = FeatureCollection(features=segments)
         return segments
 
     def get_services_for_each_segment(self, geojson_data: FeatureCollection):
-        gdf = gpd.GeoDataFrame.from_features(geojson_data, crs='epsg:4326')
+        gdf = gpd.GeoDataFrame.from_features(geojson_data, crs="epsg:4326")
         for segment in self.segments:
-            mask = gpd.GeoDataFrame.from_features([segment.to_geojson()], crs='epsg:4326')
+            mask = gpd.GeoDataFrame.from_features(
+                [segment.to_geojson()], crs="epsg:4326"
+            )
             masked = gpd.clip(gdf, mask)
-            shapes = masked['shape_id'].tolist()
-            print(f'In {segment} the services are: {shapes}')
+            shapes = masked["shape_id"].tolist()
+            print(f"In {segment} the services are: {shapes}")
 
     def assign_stops_for_each_segment(self, stops_df: pd.DataFrame):
-        # stop_id, lat, lon
-        stops = []
-        for _, stop in stops_df.iterrows():
-            stop_lat = stop['stop_lat']
-            stop_lon = stop['stop_lon']
-            stop_id = stop['stop_id']
-            stops.append(
-                Feature(geometry=Point(coordinates=[stop_lon, stop_lat]), properties={"stop_id": stop_id})
-            )
-        stops = FeatureCollection(features=stops)
+        # Convertir stops a GeoDataFrame
+        stops_gdf = gpd.GeoDataFrame(
+            stops_df,
+            geometry=gpd.points_from_xy(stops_df["stop_lon"], stops_df["stop_lat"]),
+            crs="epsg:4326",
+        )
+
+        # Obtener segmentos como GeoDataFrame
         segments = self.segments_to_gdf()
-        stops_gdf = gpd.GeoDataFrame.from_features(stops, crs='epsg:4326')
-        segments_gdf = gpd.GeoDataFrame.from_features(segments, crs='epsg:4326')
+        segments_gdf = gpd.GeoDataFrame.from_features(segments, crs="epsg:4326")
 
-        buffer_distance = 0.0001
-        segments_gdf["buffer"] = segments_gdf.geometry.apply(
-            lambda x: x.buffer(buffer_distance, cap_style='flat', join_style="bevel"))
+        # VALIDAR Y LIMPIAR GEOMETRÍAS
+        # Filtrar stops con coordenadas válidas
+        stops_gdf = stops_gdf[
+            (stops_gdf.geometry.notna())
+            & (stops_gdf.geometry.is_valid)
+            & (~stops_gdf.geometry.is_empty)
+        ]
 
-        for idx, line in segments_gdf.iterrows():
-            buffer = line["buffer"]
-            stops_inside_buffer = stops_gdf[stops_gdf.geometry.within(buffer)]
-            for _, stop in stops_inside_buffer.iterrows():
+        # Validar y reparar geometrías de segmentos
+        segments_gdf = segments_gdf[
+            (segments_gdf.geometry.notna()) & (~segments_gdf.geometry.is_empty)
+        ]
+        segments_gdf["geometry"] = segments_gdf.geometry.apply(
+            lambda geom: geom if geom.is_valid else geom.buffer(0)
+        )
+
+        if len(stops_gdf) == 0 or len(segments_gdf) == 0:
+            print("No hay geometrías válidas para procesar")
+            return
+
+        # Proyectar a un CRS métrico para cálculos de distancia precisos
+        utm_crs = "epsg:32719"  # Ajusta según tu región
+
+        try:
+            stops_projected = stops_gdf.to_crs(utm_crs)
+            segments_projected = segments_gdf.to_crs(utm_crs)
+        except Exception as e:
+            print(f"Error en proyección: {e}")
+            # Fallback: trabajar directamente en WGS84 con distancias en grados
+            stops_projected = stops_gdf
+            segments_projected = segments_gdf
+
+        # Para cada parada, encontrar el segmento más cercano
+        stops_created = 0
+        stops_skipped = 0
+
+        for idx, stop in stops_projected.iterrows():
+            try:
+                # Calcular distancia a todos los segmentos
+                distances = segments_projected.geometry.distance(stop.geometry)
+
+                # Verificar que hay distancias válidas
+                if distances.isna().all():
+                    stops_skipped += 1
+                    continue
+
+                # Encontrar el índice del segmento más cercano
+                closest_segment_idx = distances.idxmin()
+                closest_segment = segments_gdf.loc[closest_segment_idx]
+                min_distance = distances.min()
+
+                # Opcional: solo asignar si está dentro de un umbral (100 metros)
+                if min_distance > 100:  # Ajusta según tus necesidades
+                    stops_skipped += 1
+                    continue
+
+                # Obtener coordenadas originales (en WGS84)
+                original_stop = stops_gdf.loc[idx]
+
+                # Crear la parada asociada al segmento más cercano
                 stop_data = {
-                    "segment": Segment.objects.get(pk=line["segment_pk"]),
-                    "stop_id": stop['stop_id'],
-                    "latitude": stop['geometry'].coords[0][1],
-                    "longitude": stop['geometry'].coords[0][0]
+                    "segment": Segment.objects.get(pk=closest_segment["segment_pk"]),
+                    "stop_id": stops_df.loc[idx, "stop_id"],
+                    "latitude": original_stop.geometry.y,
+                    "longitude": original_stop.geometry.x,
                 }
                 Stop.objects.create(**stop_data)
+                stops_created += 1
+
+            except Exception as e:
+                print(f"Error procesando parada {stops_df.loc[idx, 'stop_id']}: {e}")
+                stops_skipped += 1
+                continue
+
+        print(f"Paradas creadas: {stops_created}, Paradas omitidas: {stops_skipped}")
