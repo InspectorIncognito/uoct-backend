@@ -9,9 +9,6 @@ def calculate_speed_and_check_alerts():
     calculate_speed(
         start_time,
         end_time,
-        hmm_max_distance=40,
-        hmm_sigma=25,
-        hmm_beta=40,
     )
     site_manager = TranSappSiteManager()
     create_alerts(start_time=start_time, end_time=end_time)
