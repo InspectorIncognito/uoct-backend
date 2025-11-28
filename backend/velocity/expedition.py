@@ -97,6 +97,19 @@ class ExpeditionData:
             ).total_seconds()
             delta_distance = current_distance - previous_distance
 
+            # Validar monotonía: descartar si hay retroceso significativo
+            if delta_distance < -10:  # Permitir pequeños errores de proyección
+                print(
+                    f"{self}: Skipping non-monotonic distance segment "
+                    f"(prev={previous_distance:.1f}m, curr={current_distance:.1f}m, delta={delta_distance:.1f}m)"
+                )
+                skipped_no_projection += 1
+                continue
+
+            # Asegurar que delta_distance sea positivo
+            if delta_distance < 0:
+                delta_distance = 0
+
             if delta_time >= self.MAXIMUM_ACCEPTABLE_TIME_BETWEEN_GPS_PULSES:
                 print(
                     f"time window between {previous_gps_pulse.timestamp} and {gps_pulse.timestamp} is greater than {self.MAXIMUM_ACCEPTABLE_TIME_BETWEEN_GPS_PULSES} seconds"
