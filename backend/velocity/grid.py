@@ -24,7 +24,7 @@ from velocity.expedition import ExpeditionData
 if TYPE_CHECKING:
     from velocity.vehicle import VehicleManager
 
-DISTANCE_THRESHOLD = 25  # meters
+DISTANCE_THRESHOLD = 40  # meters
 
 
 class GridCell:
@@ -80,7 +80,6 @@ class GridManager(Dict[Tuple[int, int], GridCell]):
         gdf = gpd.GeoDataFrame.from_features(features)
         return gdf
 
-    # TODO: look where and why is used this method
     def filter_gps(self):
         queryset = get_gps_data_from_last_15_minutes()
         gps_gdf = self.get_gps_gdf(queryset)
@@ -139,10 +138,29 @@ class GridManager(Dict[Tuple[int, int], GridCell]):
             Point(grid_min_lat, grid_max_lon), algorithm="haversine"
         )
 
-        self.latitude_cells_number = round(lat_dist / self.expected_cell_size_in_meters)
-        self.longitude_cells_number = round(
-            lon_dist / self.expected_cell_size_in_meters
+        # Calcular número de celdas (truncar para obtener celdas completas)
+        lat_cells_complete = int(lat_dist / self.expected_cell_size_in_meters)
+        lon_cells_complete = int(lon_dist / self.expected_cell_size_in_meters)
+
+        # Calcular distancia restante
+        lat_remainder = lat_dist - (
+            lat_cells_complete * self.expected_cell_size_in_meters
         )
+        lon_remainder = lon_dist - (
+            lon_cells_complete * self.expected_cell_size_in_meters
+        )
+
+        # Si el resto es menor a 0.75 * expected_cell_size, se junta con la última celda
+        # De lo contrario, se crea una celda adicional
+        if lat_remainder >= 0.75 * self.expected_cell_size_in_meters:
+            self.latitude_cells_number = lat_cells_complete + 1
+        else:
+            self.latitude_cells_number = lat_cells_complete
+
+        if lon_remainder >= 0.75 * self.expected_cell_size_in_meters:
+            self.longitude_cells_number = lon_cells_complete + 1
+        else:
+            self.longitude_cells_number = lon_cells_complete
 
         delta_lat = grid_max_lat - grid_min_lat
         delta_lon = grid_max_lon - grid_min_lon
@@ -214,6 +232,12 @@ class GridManager(Dict[Tuple[int, int], GridCell]):
     def get_cell_indexes_from_point(self, lat: float, lon: float) -> Tuple[int, int]:
         lat_index = int((lat - self.grid_min_latitude) / self.grid_latitude_distance)
         lon_index = int((lon - self.grid_min_longitude) / self.grid_longitude_distance)
+
+        # Asegurar que los índices estén dentro del rango válido
+        lat_index = min(lat_index, self.latitude_cells_number - 1)
+        lon_index = min(lon_index, self.longitude_cells_number - 1)
+        lat_index = max(lat_index, 0)
+        lon_index = max(lon_index, 0)
 
         return lat_index, lon_index
 
@@ -448,9 +472,6 @@ class GridManager(Dict[Tuple[int, int], GridCell]):
         vehicle_data.expeditions.pop(expedition)
         new_set = {}
         for shape_pk, (idxs, seg_pks) in shape_pks.items():
-            print(
-                f"Creating new expedition for shape_pk {shape_pk} with {len(idxs)} GPS points."
-            )
             expedition_copy = ExpeditionData(
                 grid_manager=expedition.grid_manager,
                 route_id=expedition.route_id,
@@ -528,38 +549,6 @@ class GridManager(Dict[Tuple[int, int], GridCell]):
 
         return distance_to_segment_start + distance_along_segment
 
-    @staticmethod
-    def _validate_matched_gps_points(expedition):
-        """
-        Valida que haya suficientes puntos GPS matcheados para calcular velocidades.
-        No interpola - los puntos sin match permanecen como None y serán descartados.
-
-        Parameters
-        ----------
-        expedition : ExpeditionData
-            Expedición con gps_distance_on_route a validar.
-        """
-        distances = expedition.gps_distance_on_route
-        n = len(distances)
-
-        if n == 0:
-            return
-
-        if n != len(expedition.gps_points):
-            raise ValueError(
-                f"Length mismatch in {expedition}: distances ({n}) != gps_points ({len(expedition.gps_points)})"
-            )
-
-        valid_count = sum(1 for d in distances if d is not None)
-
-        if valid_count < 2:
-            raise ValueError(
-                f"Expedition {expedition} has less than 2 valid GPS points matched by HMM. "
-                f"Cannot calculate speed with {valid_count} matched points (need at least 2)."
-            )
-
-        # No interpolar - los valores None se quedan como None y serán descartados en calculate_speed
-
     def _update_expedition_from_hmm_results(
         self,
         expedition,
@@ -569,8 +558,6 @@ class GridManager(Dict[Tuple[int, int], GridCell]):
         segments_gdf: gpd.GeoDataFrame,
     ):
         """
-        Actualiza la expedición con los resultados del HMM.
-
         Parameters
         ----------
         expedition : ExpeditionData
@@ -580,10 +567,14 @@ class GridManager(Dict[Tuple[int, int], GridCell]):
         valid_indices : List[int]
             Lista de índices ORIGINALES de GPS que tienen match.
         projected_points : List[Optional[shp_Point]]
-            Lista de puntos proyectados, misma longitud que matched_segments.
+            Lista de puntos proyectados del HMM (no utilizados - se recalculan con grilla).
         segments_gdf : gpd.GeoDataFrame
             GeoDataFrame con información de segmentos.
         """
+        # Obtener shape_id de la expedición
+        if expedition.shape_id is None:
+            print("WARNING: expedition.shape_id is None, cannot calculate distances")
+            return
 
         # Inicializar listas si están vacías
         if not expedition.gps_distance_on_route:
@@ -617,9 +608,6 @@ class GridManager(Dict[Tuple[int, int], GridCell]):
                 except Exception as e:
                     print(f"Error processing GPS point {idx}: {e}")
                     continue
-
-        # Validar que haya suficientes puntos matcheados (no interpolar)
-        # self._validate_matched_gps_points(expedition)
 
     def run_hmm_map_matching(
         self,
@@ -671,14 +659,8 @@ class GridManager(Dict[Tuple[int, int], GridCell]):
                     )
 
         # Precalculate shapes caches
-        # TODO: Change spatial idx to use segment.pk or similar
-        # NOTE: now shapes_cache method return the segment pk for the segment ids
         self.shape_manager.shapes_cache(segments_gdfs=segments_gdfs)
 
-        batch_results: Dict[
-            str,
-            Dict[str, Tuple[List[Optional[int]], List[int], List[Optional[shp_Point]]]],
-        ] = {}
         vehicle_data_values = list(vm.vehicles.values())
         segments_cnt = set()
         for vehicle_data in vehicle_data_values:
@@ -695,8 +677,6 @@ class GridManager(Dict[Tuple[int, int], GridCell]):
                     Tuple[List[Optional[int]], List[int], List[Optional[shp_Point]]],
                 ] = {}
                 for axis_id in segments_gdfs.keys():
-                    # TODO: use proper indentifiers for segments. Right now, we are using the index in the GeoDataFrame, wich is not stable.
-                    # Use segment.pk or similar.
                     matched_segments, valid_indices, projected_points = viterbi(
                         trajectory,
                         self.shape_manager.direction_caches[axis_id],
