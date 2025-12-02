@@ -130,8 +130,9 @@ way(area.target_area)
   [highway~"^(primary|secondary)$"]
   [name~"^(Avenida Independencia)$"]
   ->.filtered_ways;
-way(589714638) ->.extra_way;
-(.filtered_ways; .extra_way;);"""
+way(589714638) ->.extra_way_1;
+way(1350031432) ->.extra_way_2;
+(.filtered_ways; .extra_way_1; .extra_way_2;);"""
 
 
 def get_axis_config(axis_name: str) -> dict:
