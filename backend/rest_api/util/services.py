@@ -312,14 +312,9 @@ def assign_routes_to_segments(
                     if seg_bearing is not None:
                         segment_bearings.append(seg_bearing)
                     route_bearing = route_bearings[idx]
-                    print(
-                        f"Segment bearing: {seg_bearing}, route bearing: {route_bearing}"
-                    )
                     if route_bearing is None or seg_bearing is None:
-                        print("One of the bearings is None, skipping segment")
                         continue
                     if abs(seg_bearing - route_bearing) % 360 > 90:
-                        print("Bearing difference too high, skipping segment")
                         continue
                     valid_segment_uuids.append(seg_uuid)
                 except (IndexError, KeyError):
