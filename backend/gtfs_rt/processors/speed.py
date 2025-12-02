@@ -14,6 +14,7 @@ def calculate_speed(
     start_date: datetime.datetime = None, end_date: datetime.datetime = None
 ):
     print("Calling calculate_speed command...")
+    speed_start_time = time.time()
     if start_date is None or end_date is None:
         start_date, end_date = get_last_temporal_range()
     today_weekday = start_date.weekday()
@@ -91,3 +92,7 @@ def calculate_speed(
             )
             Speed.objects.create(**speed_data)
     print("Speed records up to date.")
+    speed_end_time = time.time()
+    print(
+        f"Speed calculation completed in {int(speed_end_time - speed_start_time)} seconds."
+    )

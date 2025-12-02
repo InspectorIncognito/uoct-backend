@@ -1,8 +1,8 @@
 from datetime import datetime, timedelta
 
 import numpy as np
-from django.utils import timezone
 import pytz
+from django.utils import timezone
 from gtfs_rt.models import GPSPulse
 
 MAD_CONST = 1.4826
@@ -49,9 +49,6 @@ def get_last_temporal_range():
     now = timezone.now()
     last_15_minutes = now - delta
     last_temporal_segment = get_temporal_segment(last_15_minutes)
-    print(
-        f"DEBUG: now={now}, last_15_minutes={last_15_minutes}, segment={last_temporal_segment}"
-    )
     return get_temporal_range(last_temporal_segment, reference_datetime=last_15_minutes)
 
 
@@ -67,7 +64,7 @@ def get_day_type(dt: datetime):
     if dt.tzinfo is None:
         raise ValueError("datetime instance must have a tzinfo")
     # Convertir a Santiago solo para determinar día de semana
-    santiago_tz = pytz.timezone('America/Santiago')
+    santiago_tz = pytz.timezone("America/Santiago")
     converted_timestamp = dt.astimezone(santiago_tz)
     weekday = converted_timestamp.weekday()
     day_type = "L" if weekday < 5 else "S" if weekday == 5 else "D"

@@ -94,7 +94,6 @@ class VehicleManager:
                     records.extend(exp_records)
                 except ValueError as e:
                     expeditions_ignored.append(str(expedition))
-                    print(e)
         print("Total expeditions:", total_expeditions)
         print("Expeditions ignored:", len(expeditions_ignored))
         return records

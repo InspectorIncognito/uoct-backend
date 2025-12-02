@@ -72,6 +72,8 @@ class ExpeditionData:
         if not self.gps_distance_on_route or len(self.gps_distance_on_route) != len(
             self.gps_points
         ):
+            if self.shape_id is None:
+                raise ValueError
             raise ValueError(
                 f"{self} does not have distance_on_route calculated. "
                 f"Expected {len(self.gps_points)} distances, got {len(self.gps_distance_on_route) if self.gps_distance_on_route else 0}."
