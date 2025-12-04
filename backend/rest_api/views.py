@@ -17,6 +17,7 @@ from rest_api.models import (
     Alert,
     AlertThreshold,
     Axles,
+    Camera,
     GTFSShape,
     HistoricSpeed,
     Segment,
@@ -30,6 +31,7 @@ from rest_api.serializers import (
     AlertSerializer,
     AlertThresholdSerializer,
     AxlesSerializer,
+    CameraSerializer,
     GTFSShapeSerializer,
     HistoricSpeedSerializer,
     SegmentSerializer,
@@ -345,3 +347,9 @@ class TrafficSignalViewSet(viewsets.ModelViewSet):
     permission_classes = [AllowAny]
     serializer_class = TrafficSignalSerializer
     queryset = TrafficSignal.objects.all()
+
+
+class CameraViewSet(viewsets.ModelViewSet):
+    permission_classes = [AllowAny]
+    serializer_class = CameraSerializer
+    queryset = Camera.objects.all()

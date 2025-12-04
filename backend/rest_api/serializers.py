@@ -2,6 +2,7 @@ from rest_api.models import (
     Alert,
     AlertThreshold,
     Axles,
+    Camera,
     GTFSShape,
     HistoricSpeed,
     Segment,
@@ -113,4 +114,9 @@ class AxlesSerializer(serializers.ModelSerializer):
 class TrafficSignalSerializer(serializers.ModelSerializer):
     class Meta:
         model = TrafficSignal
+        fields = "__all__"
+
+class CameraSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = Camera
         fields = "__all__"

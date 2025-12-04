@@ -2,6 +2,7 @@ from django.urls import include, path
 from rest_api.views import (
     AlertViewSet,
     AxlesViewSet,
+    CameraViewSet,
     GeoJSONViewSet,
     GridViewSet,
     GTFSShapeViewSet,
@@ -13,6 +14,7 @@ from rest_api.views import (
     SpeedViewSet,
     StopViewSet,
     TestView,
+    TrafficSignalViewSet,
 )
 from rest_framework.routers import DefaultRouter
 
@@ -58,4 +60,6 @@ urlpatterns = [
     ),
     path("debug/speed/", GridViewSet.as_view(), name="segments"),
     path("debug/test/", TestView.as_view(), name="debug-test"),
+    path("traffic_signal/", TrafficSignalViewSet.as_view({"get": "list"}), name="traffic_signal"),
+    path("camera/", CameraViewSet.as_view({"get": "list"}), name="camera"),
 ] + router.urls

@@ -3,7 +3,7 @@ from rest_api.util.shape import ShapeManager
 
 
 def flush_traffic_signals_from_db():
-    pass
+    TrafficSignal.objects.all().delete()
 
 
 def assign_traffic_signals_to_segments():
