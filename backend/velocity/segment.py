@@ -281,6 +281,24 @@ class FiveHundredMeterSegmentCriteria(SegmentCriteria):
                 )
                 segment_list.append(ss_obj)
                 segment_init_list[shape_id].append(start_distance)
+
+            # Merge last segment with previous one if it's < 0.75 * segment_distance
+            if len(segment_list) >= 2:
+                last_segment = segment_list[-1]
+                last_length = last_segment.end_distance - last_segment.start_distance
+
+                if last_length < 0.75 * self.spatial_segment_distance:
+                    prev_segment = segment_list[-2]
+                    merged_segment = SpatialSegment(
+                        index=prev_segment.index,
+                        start_distance=prev_segment.start_distance,
+                        end_distance=last_segment.end_distance,
+                        is_last=True,
+                    )
+                    segment_list[-2] = merged_segment
+                    segment_list.pop(-1)
+                    segment_init_list[shape_id].pop(-1)
+
             data[shape_id] = segment_list
 
         return data, segment_init_list
