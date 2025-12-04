@@ -211,18 +211,6 @@ class ExpeditionData:
                         speed_data.append(speed_row)
                     aux_start_distance += i_delta_dist
 
-        # Log información sobre puntos descartados
-        if skipped_no_projection > 0:
-            total_segments = len(self.gps_points) - 1
-            matched_percentage = (
-                ((total_segments - skipped_no_projection) / total_segments * 100)
-                if total_segments > 0
-                else 0
-            )
-            print(
-                f"{self}: Discarded {skipped_no_projection}/{total_segments} GPS segments without HMM projection ({matched_percentage:.1f}% matched)"
-            )
-
         return speed_data
 
     def __format_speed_data_row(

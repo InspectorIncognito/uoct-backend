@@ -14,8 +14,7 @@ class VehicleData:
 
     def add_gps_pulse(self, gps_point: GPS, route_id: str, license_plate: str):
         # TODO: ver si es necesario crear nuevas expediciones si hay gaps de tiempo grandes.
-        # TODO: Actualizar a nuevo hash de expedicion, ahora se crea cada vez que se crea una
-        # nueva expedicion
+        # TODO: Ver si se necesita la ruta para diferenciar expediciones ya que luego del MM se puede perder.
         if (license_plate, route_id) not in self.exp_plate_route_ids:
             new_exp = ExpeditionData(
                 self.grid_manager,
@@ -57,11 +56,10 @@ class VehicleManager:
         direction = gps_data.direction
         longitude = gps_pulse.x
         latitude = gps_pulse.y
-        bearing = gps_data.bearing  # TODO: add bearing usage
+        bearing = gps_data.bearing
         vehicle_data = VehicleData(self.grid_manager, license_plate=license_plate)
         if vehicle_data not in self.vehicles:
             self.vehicles[vehicle_data] = vehicle_data
-        # TODO: use hmm to snap GPS points to route, not the closest point or the route id stored in the GTFS-RT
         try:
             if direction is not None:
                 direction_str = "I" if direction == 0 else "R"

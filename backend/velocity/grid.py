@@ -413,8 +413,6 @@ class GridManager(Dict[Tuple[int, int], GridCell]):
         else:
             return None, None
 
-    # TODO: Si actualizo la lista de GPS points, pero utilizo los índices viejos, puede fallar.
-    # Hay que arreglar ese error
     @staticmethod
     def _determine_shape_pk_from_matched_segments(
         expedition,

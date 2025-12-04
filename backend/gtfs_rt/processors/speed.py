@@ -36,6 +36,7 @@ def calculate_speed(
     print(f"Running HMM map matching for speed calculation...")
     start_time = time.time()
     # run_hmm_map_matching ahora actualiza las expediciones directamente
+    # TODO: try to parallelize this process
     grid_obj.run_hmm_map_matching(vm)
     end_time = time.time()
     print(f"HMM map matching completed in {int(end_time - start_time)} seconds.")

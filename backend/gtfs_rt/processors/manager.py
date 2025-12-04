@@ -121,9 +121,7 @@ class GTFSRTManager:
             return
         self.__update_previous_timestamp(timestamp)
         self.save_gtfs_rt_to_db(feed)
-    # TODO: Review this method to be sure to run correctly in cron jobs and collect all data, 
-    # Be careful with license plates that can be repeated in different vehicles. We need to discard the ones
-    # that are to far of the axis.
+
     def run_process_cron(self):
         raw_data = self.download_raw_gtfs_rt_data()
         feed = self.read_proto_raw_content(raw_data)

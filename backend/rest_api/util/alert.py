@@ -15,7 +15,7 @@ logger = logging.getLogger(__name__)
 DAYS = ["monday", "tuesday", "wednesday", "thursday", "friday", "saturday", "sunday"]
 ALERT_AUTHOR = config("ALERT_AUTHOR")
 
-
+# TODO: Review how to handle alerts creation and updates to TranSapp's Admin site
 class TranSappSiteManager:
 
     def __init__(self):

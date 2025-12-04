@@ -218,8 +218,6 @@ def assign_routes_to_segments(
     print(f"Prepared {len(axis_segments)} axes for matching")
     total_segments = sum(len(gdf) for gdf in axis_segments.values() if gdf is not None)
     print(f"Total segments available across axes: {total_segments}")
-    # TODO: se cambio en shape_manager el segment id para que sea el pk del segmento
-    #  -> revisar que todo funcione bien con este cambio
     # 4) Ejecutar el emparejamiento HMM en batch
     print(f"Running batch HMM matching on {len(shapes_trajectories)} trajectories")
     start_time = time.time()
