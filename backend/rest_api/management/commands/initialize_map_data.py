@@ -23,6 +23,10 @@ class Command(BaseCommand):
         call_command("assign_routes_to_segments")
         # Assign stops to all segments
         call_command("assign_stops_to_segments")
+        # Assign cameras to all segments
+        call_command("assign_cameras_to_segments")
+        # Assign traffic signals to all segments
+        call_command("assign_traffic_signals_to_segments")
         # Set alert threshold value
         call_command("set_alert_threshold")
         # Set gtfs rt timestamp manager
