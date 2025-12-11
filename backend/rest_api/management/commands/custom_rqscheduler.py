@@ -39,6 +39,7 @@ def register_scheduled_jobs():
         repeat=None,  # Repeat this number of times (None means repeat forever)
         use_local_timezone=False,  # Interpret hours in the local timezone
     )
+    # TODO: Analyze if we need to delete speeds records periodically
     scheduler.cron(
         "0/15 * * * *",  # every 15 minutes
         func=calculate_speed_and_check_alerts,  # Function to be queued

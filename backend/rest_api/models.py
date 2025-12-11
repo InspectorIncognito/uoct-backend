@@ -216,7 +216,7 @@ class Speed(models.Model):
         for min_speed, max_speed, color in SPEED_COLOR_RANGES:
             if min_speed <= self.get_speed() <= max_speed:
                 return color
-        return "#000000"
+        return "#FFFFFF"
 
     def check_value(self):
         geojson_data = dict()
@@ -334,9 +334,9 @@ class TrafficSignal(models.Model):
     latitude = models.FloatField()
     longitude = models.FloatField()
 
-#TODO: Add camera 
+
 class Camera(models.Model):
     camera_id = models.CharField(max_length=128)
     segment_id = models.ForeignKey(Segment, on_delete=models.CASCADE)
     latitude = models.FloatField()
-    longitude = models.FloatField() 
+    longitude = models.FloatField()

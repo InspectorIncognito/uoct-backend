@@ -1,5 +1,7 @@
 from django.http import JsonResponse
 from django.utils import timezone
+from django.utils.decorators import method_decorator
+from django.views.decorators.csrf import csrf_exempt
 from rest_framework import generics
 from rest_framework.authentication import TokenAuthentication
 from rest_framework.authtoken.models import Token
@@ -9,6 +11,7 @@ from rest_framework.status import HTTP_200_OK
 from user.serializers import UserLoginSerializer, UserSerializer
 
 
+@method_decorator(csrf_exempt, name="dispatch")
 class LoginViewSet(generics.GenericAPIView):
     serializer_class = UserLoginSerializer
     permission_classes = [
