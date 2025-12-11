@@ -65,8 +65,8 @@ def calculate_speed(
 
     # Removing outliers
     # TODO: Remove outliers using historical data (with medians)
-    lower_threshold = 4
-    upper_threshold = 80
+    lower_threshold = 2
+    upper_threshold = 85
     df = df[
         (df["speed(km/h)"] > lower_threshold) & (df["speed(km/h)"] <= upper_threshold)
     ]

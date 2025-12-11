@@ -100,13 +100,35 @@ class ExpeditionData:
             delta_distance = current_distance - previous_distance
 
             # Validar monotonía: descartar si hay retroceso significativo
-            if delta_distance < -10:  # Permitir pequeños errores de proyección
-                print(
-                    f"{self}: Skipping non-monotonic distance segment "
-                    f"(prev={previous_distance:.1f}m, curr={current_distance:.1f}m, delta={delta_distance:.1f}m)"
+            if delta_distance < -50:  # Permitir pequeños errores de proyección
+                next_gps_pulse = (
+                    self.gps_points[index + 1]
+                    if index + 1 < len(self.gps_points)
+                    else None
                 )
-                skipped_no_projection += 1
-                continue
+                next_distance = (
+                    self.gps_distance_on_route[index + 1] if next_gps_pulse else None
+                )
+                if next_distance is not None and next_distance >= current_distance:
+                    # Si el siguiente punto es válido y avanza, asumir que el punto actual es erróneo (distancia 0)
+                    current_spatial_segment_obj = segment_criteria.get_spatial_segment(
+                        self.shape_id, current_distance
+                    )
+                    print(
+                        f"{self}: Correcting non-monotonic distance segment: {self.shape_id}: {current_spatial_segment_obj}"
+                        f"(prev={previous_distance:.1f}m, curr={current_distance:.1f}m, next={next_distance:.1f}m)"
+                    )
+                    delta_distance = 0
+                else:
+                    current_spatial_segment_obj = segment_criteria.get_spatial_segment(
+                        self.shape_id, current_distance
+                    )
+                    print(
+                        f"{self}: Skipping non-monotonic distance segment: {self.shape_id}: {current_spatial_segment_obj}"
+                        f"(prev={previous_distance:.1f}m, curr={current_distance:.1f}m, delta={delta_distance:.1f}m)"
+                    )
+                    skipped_no_projection += 1
+                    continue
 
             # Asegurar que delta_distance sea positivo
             if delta_distance < 0:
