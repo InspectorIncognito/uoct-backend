@@ -69,23 +69,20 @@ def assign_cameras_to_segments():
         cameras_projected = cameras_gdf
         segments_projected = segments_gdf
 
-    # For each camera, find all segments within 10 meters
+    # For each camera, find all segments within a 15-meter buffer
     cameras_created = 0
     cameras_skipped = 0
     radius_meters = 15
 
     for idx, camera in cameras_projected.iterrows():
         try:
-            # Calculate distance to all segments
-            distances = segments_projected.geometry.distance(camera.geometry)
+            # Create a buffer around the camera point
+            camera_buffer = camera.geometry.buffer(radius_meters)
 
-            # Check for valid distances
-            if distances.isna().all():
-                cameras_skipped += 1
-                continue
-
-            # Find all segments within the 10-meter radius
-            segments_within_radius = distances[distances <= radius_meters]
+            # Find all segments that intersect with the buffer
+            segments_within_radius = segments_projected[
+                segments_projected.geometry.intersects(camera_buffer)
+            ]
 
             if len(segments_within_radius) == 0:
                 cameras_skipped += 1
@@ -98,8 +95,7 @@ def assign_cameras_to_segments():
             original_camera = cameras_gdf.loc[idx]
 
             # Create a Camera object for each segment within the radius
-            for segment_idx in segments_within_radius.index:
-                segment = segments_gdf.loc[segment_idx]
+            for segment_idx, segment in segments_within_radius.iterrows():
                 camera_data = {
                     "camera_id": str(int(cameras_df.loc[idx, "ID"])),
                     "segment_id": Segment.objects.get(pk=segment["segment_pk"]),

@@ -351,5 +351,6 @@ class TrafficSignalViewSet(viewsets.ModelViewSet):
 
 class CameraViewSet(viewsets.ModelViewSet):
     permission_classes = [AllowAny]
+    pagination_class = None
     serializer_class = CameraSerializer
     queryset = Camera.objects.all()
