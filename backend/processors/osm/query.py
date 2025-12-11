@@ -88,16 +88,27 @@ EJES_PRINCIPALES = {
     #         "Avenida Vespucio Norte",
     #     ],
     # },
-    "Eje Américo Vespucio Sur": {
+    # "Eje Américo Vespucio Sur": {
+    #     "city": "Provincia de Santiago",
+    #     "streets": [
+    #         "Autopista Vespucio Sur",
+    #         "Avenida Vespucio Sur",
+    #     ],
+    # },
+    # "Eje Américo Vespucio Oriente": {
+    #     "city": "Provincia de Santiago",
+    #     "streets": [
+    #         "Autopista Vespucio Oriente",
+    #         "Avenida Ossa",
+    #     ],
+    # },
+    "Eje Américo Vespucio": {
         "city": "Provincia de Santiago",
         "streets": [
+            "Autopista Vespucio Norte",
+            "Avenida Vespucio Norte",
             "Autopista Vespucio Sur",
             "Avenida Vespucio Sur",
-        ],
-    },
-    "Eje Américo Vespucio Oriente": {
-        "city": "Provincia de Santiago",
-        "streets": [
             "Autopista Vespucio Oriente",
             "Avenida Ossa",
         ],
@@ -122,6 +133,9 @@ VESPUCIO_ORIENTE_OVERPASS_QUERY = """relation(6582778);
 way(r)
   [highway~"^(motorway|primary)"]
   [name~"(Autopista Vespucio Oriente|Avenida Ossa)"];"""
+
+VESPUCIO_QUERY = """relation(6582778);
+way(r);"""
 
 INDEPENDENCIA_QUERY = """
 rel(1674530);

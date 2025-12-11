@@ -15,6 +15,7 @@ from processors.geometry.utils import interpolate_points_by_distance
 from processors.osm.query import (
     INDEPENDENCIA_QUERY,
     VESPUCIO_ORIENTE_OVERPASS_QUERY,
+    VESPUCIO_QUERY,
     VESPUCIO_SUR_OVERPASS_QUERY,
     OSMDownloader,
 )
@@ -909,12 +910,12 @@ def process_osm_queries(distance_threshold: float = 500.0, use_fixtures: bool = 
     for idx, axle in enumerate(axles_qs):
         axis_config = {"city": axle.city, "streets": axle.streets}
         try:
-            if axle.name == "Eje Américo Vespucio Norte":
-                query = VESPUCIO_NORTE_OVERPASS_QUERY
-            elif axle.name == "Eje Américo Vespucio Sur":
-                query = VESPUCIO_SUR_OVERPASS_QUERY
-            elif axle.name == "Eje Américo Vespucio Oriente":
-                query = VESPUCIO_ORIENTE_OVERPASS_QUERY
+            if axle.name == "Eje Américo Vespucio":
+                query = VESPUCIO_QUERY
+            # elif axle.name == "Eje Américo Vespucio Sur":
+            #     query = VESPUCIO_SUR_OVERPASS_QUERY
+            # elif axle.name == "Eje Américo Vespucio Oriente":
+            #     query = VESPUCIO_ORIENTE_OVERPASS_QUERY
             elif axle.name == "Eje Independencia":
                 query = INDEPENDENCIA_QUERY
             else:
