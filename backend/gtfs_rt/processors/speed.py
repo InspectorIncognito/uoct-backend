@@ -28,12 +28,12 @@ def calculate_speed(
     print(f"Retrieved {len(gps_df)} GPS Pulses.")
 
     start_time = time.time()
-    for _, gps in gps_df.iterrows():
+    for gps in gps_df.itertuples():
         vm.add_data(gps)
     end_time = time.time()
     print(f"GPS processed in {int(end_time - start_time)} seconds.")
 
-    print(f"Running HMM map matching for speed calculation...")
+    print("Running HMM map matching for speed calculation...")
     start_time = time.time()
     # run_hmm_map_matching ahora actualiza las expediciones directamente
     # TODO: try to parallelize this process
