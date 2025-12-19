@@ -11,5 +11,10 @@ class GPSPulse(models.Model):
     bearing = models.FloatField(null=True, blank=True)
     timestamp = models.DateTimeField(default=timezone.localtime)
 
+    class Meta:
+        indexes = [
+            models.Index(fields=["timestamp"]),
+        ]
+
     def __str__(self):
         return f"({self.latitude}, {self.longitude})"
