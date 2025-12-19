@@ -39,7 +39,7 @@ webserver-prod)
   # TODO: If you need to load data from fixtures, this is the place to call them
   # python manage.py loaddata
 
-  gunicorn --workers=5 --threads=100 --name backend-gunicorn --chdir backend --access-logfile - --bind :8000 backend.wsgi:application -t 1200
+  gunicorn --workers=2 --threads=50 --name backend-gunicorn --chdir backend --access-logfile - --bind :8000 backend.wsgi:application -t 1200 --max-requests=1000 --max-requests-jitter=50
   ;;
 worker)
   echo "starting worker"
