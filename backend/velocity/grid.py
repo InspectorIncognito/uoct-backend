@@ -2,14 +2,11 @@ from __future__ import annotations
 
 import math
 import traceback
-from collections import Counter
 from typing import TYPE_CHECKING, Dict, List, Optional, Tuple
 
 import geopandas as gpd
 import pandas as pd
 from django.utils import timezone
-from geojson import Feature
-from geojson import Point as GeoPoint
 from gtfs_rt.models import GPSPulse
 from gtfs_rt.services import get_gps_data_from_last_15_minutes
 from processors.geometry.line import PolylineSegment
@@ -19,6 +16,7 @@ from rest_api.util.hmm.hmm import haversine_distance, viterbi
 from rest_api.util.shape import ShapeManager
 from shapely.geometry import LineString as shp_LineString
 from shapely.geometry import Point as shp_Point
+
 from velocity.expedition import ExpeditionData
 
 if TYPE_CHECKING:
@@ -58,26 +56,27 @@ class GridManager(Dict[Tuple[int, int], GridCell]):
         self.bbox = None
 
     def get_gps_gdf(self, queryset):
-        features = []
-        for gps in queryset:
-            timestamp = gps.timestamp
-            timestamp = timezone.localtime(value=timestamp)
-            route_id = gps.route_id
-            direction = gps.direction
-            license_plate = gps.license_plate
-            bearing = gps.bearing
-            feat = Feature(
-                geometry=GeoPoint(coordinates=[gps.longitude, gps.latitude]),
-                properties=dict(
-                    route_id=route_id,
-                    direction=direction,
-                    bearing=bearing,
-                    license_plate=license_plate,
-                    timestamp=timestamp,
-                ),
-            )
-            features.append(feat)
-        gdf = gpd.GeoDataFrame.from_features(features)
+        # Convert QuerySet to DataFrame using .values() to get dictionaries
+        df = pd.DataFrame(list(queryset.values()))
+
+        # Handle empty DataFrame
+        if df.empty:
+            return gpd.GeoDataFrame()
+
+        df["route_id"] = df["route_id"].astype("category")
+        df["license_plate"] = df["license_plate"].astype("category")
+        df["direction"] = df["direction"].fillna(-1).astype("int8")  # -1 for unknown direction
+        df["bearing"] = df["bearing"].astype("float32")
+        df["timestamp"] = df["timestamp"].apply(timezone.localtime)
+        geometry = gpd.points_from_xy(
+            df["longitude"].astype("float32"),
+            df["latitude"].astype("float32"),
+        )
+        gdf = gpd.GeoDataFrame(
+            df.drop(columns=["longitude", "latitude"]),
+            geometry=geometry,
+            crs="EPSG:4326",
+        )
         return gdf
 
     def filter_gps(self):
@@ -89,8 +88,7 @@ class GridManager(Dict[Tuple[int, int], GridCell]):
         queryset = GPSPulse.objects.filter(
             timestamp__gte=start_date, timestamp__lte=end_date
         )
-        gps_gdf = self.get_gps_gdf(queryset)
-        return gps_gdf
+        return self.get_gps_gdf(queryset)
 
     def process(self):
         grid = self.__create_grid()
@@ -670,10 +668,6 @@ class GridManager(Dict[Tuple[int, int], GridCell]):
                 ]
                 bearings = [gps_point.bearing for gps_point in expedition.gps_points]
                 excluded_indices = set()
-                per_traj_results: Dict[
-                    str,
-                    Tuple[List[Optional[int]], List[int], List[Optional[shp_Point]]],
-                ] = {}
                 for axis_id in segments_gdfs.keys():
                     matched_segments, valid_indices, projected_points = viterbi(
                         trajectory,
@@ -744,7 +738,7 @@ class GridManager(Dict[Tuple[int, int], GridCell]):
             f"HMM map matching completed. Processed expeditions from {len(vm.vehicles)} vehicles."
         )
         print(f"Unique matched segments: {len(segments_cnt)}")
-        print(f"Expeditions per shape_id:")
+        print("Expeditions per shape_id:")
         for shape_id, count in sorted(
             shape_stats.items(), key=lambda x: x[1], reverse=True
         ):
