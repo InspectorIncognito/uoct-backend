@@ -1,4 +1,5 @@
-from rest_api.util.services import get_all_services, get_shape_by_route_id
+from rest_api.util.services import get_all_services
+
 from velocity.expedition import ExpeditionData
 from velocity.gps import GPSPulse as GPS
 from velocity.grid import GridManager
@@ -54,6 +55,8 @@ class VehicleManager:
         license_plate = gps_data.license_plate
         route = gps_data.route_id
         direction = gps_data.direction
+        if direction == -1:
+            direction = None
         longitude = gps_pulse.x
         latitude = gps_pulse.y
         bearing = gps_data.bearing
@@ -75,7 +78,7 @@ class VehicleManager:
                 direction=direction,
             )
             self.vehicles[vehicle_data].add_gps_pulse(gps_obj, route_id, license_plate)
-        except ValueError as e:
+        except ValueError:
             pass
             # print(e)
 
@@ -90,7 +93,7 @@ class VehicleManager:
                 try:
                     exp_records = expedition.calculate_speed(segment_criteria)
                     records.extend(exp_records)
-                except ValueError as e:
+                except ValueError:
                     expeditions_ignored.append(str(expedition))
         print("Total expeditions:", total_expeditions)
         print("Expeditions ignored:", len(expeditions_ignored))
