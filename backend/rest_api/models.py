@@ -203,6 +203,7 @@ class Speed(models.Model):
     distance = models.FloatField(default=0)
     time_secs = models.FloatField(default=0)
     timestamp = models.DateTimeField(default=timezone.now)
+    services = ArrayField(models.CharField(max_length=124), blank=True, null=True)
 
     # speed = models.FloatField(blank=False, null=False)
 

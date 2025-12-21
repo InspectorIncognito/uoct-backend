@@ -2,12 +2,13 @@ import datetime
 import time
 
 import pandas as pd
-from gtfs_rt.utils import get_last_temporal_range
 from rest_api.models import Segment, Speed
 from velocity.grid import GridManager
 from velocity.segment import FiveHundredMeterSegmentCriteria
 from velocity.utils import generate_grid
 from velocity.vehicle import VehicleManager
+
+from gtfs_rt.utils import get_last_temporal_range
 
 
 def calculate_speed(
@@ -46,6 +47,7 @@ def calculate_speed(
     df = pd.DataFrame.from_records(speed_records)[
         [
             "shape_id",
+            "route_id",
             "spatial_segment_index",
             "local_temporal_segment_index",
             "distance_mts",
@@ -56,7 +58,13 @@ def calculate_speed(
         df.groupby(
             ["shape_id", "spatial_segment_index", "local_temporal_segment_index"]
         )
-        .agg({"distance_mts": "sum", "time_secs": "sum"})
+        .agg(
+            {
+                "distance_mts": "sum",
+                "time_secs": "sum",
+                "route_id": lambda x: list(x.unique()),
+            }
+        )
         .reset_index()
     )
     df = df.round({"distance_mts": 2, "time_secs": 2})
@@ -90,6 +98,7 @@ def calculate_speed(
                 distance=distance,
                 time_secs=time_secs,
                 timestamp=start_date,
+                services=data["route_id"],
             )
             Speed.objects.create(**speed_data)
     print("Speed records up to date.")
