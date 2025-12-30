@@ -1,7 +1,8 @@
 import geopandas as gpd
 import pandas as pd
-from geojson import Feature, FeatureCollection, LineString, Point
-from rest_api.models import Segment, Services, Stop
+from geojson import Feature, FeatureCollection, LineString
+
+from rest_api.models import Segment, Stop
 
 
 class SegmentManager:
@@ -93,8 +94,7 @@ class SegmentManager:
                 closest_segment = segments_gdf.loc[closest_segment_idx]
                 min_distance = distances.min()
 
-                # Opcional: solo asignar si está dentro de un umbral (100 metros)
-                if min_distance > 100:  # Ajusta según tus necesidades
+                if min_distance > 30:  # Ajusta según tus necesidades
                     stops_skipped += 1
                     continue
 
@@ -117,3 +117,6 @@ class SegmentManager:
                 continue
 
         print(f"Paradas creadas: {stops_created}, Paradas omitidas: {stops_skipped}")
+    
+    def assign_traffic_signals_to_segments(self):
+        pass
