@@ -1,14 +1,14 @@
 import datetime
 import sched
 import time
-from datetime import UTC
 
 import requests
 from django.utils import timezone
 from google.transit import gtfs_realtime_pb2
-from gtfs_rt.config import PROTO_URL, TIMEZONE
-from gtfs_rt.models import GPSPulse
 from rest_api.models import GTFSRTTimestamp
+
+from gtfs_rt.config import PROTO_URL
+from gtfs_rt.models import GPSPulse
 
 
 class GTFSRTManager:
@@ -42,6 +42,7 @@ class GTFSRTManager:
     def download_raw_gtfs_rt_data(self):
         response = requests.get(self.url)
         return response.content
+
     # TODO: Review this method to be sure that duplicated data is not stored in DB.
     # Fix the logic to compare timestamps correctly.
     # Use UTC timezone for timestamp comparison.
@@ -51,9 +52,10 @@ class GTFSRTManager:
             current_timestamp = str(current_timestamp)
             manager = GTFSRTTimestamp.objects.first()
             last_timestamp = manager.last_timestamp
-            if current_timestamp <= last_timestamp:
-                print("Ignoring duplicated GTFS-RT")
-                return
+            if last_timestamp != "":
+                if current_timestamp <= last_timestamp:
+                    print("Ignoring duplicated GTFS-RT")
+                    return
             else:
                 manager.last_timestamp = current_timestamp
                 manager.save()
@@ -63,13 +65,9 @@ class GTFSRTManager:
                 v = entity.vehicle
                 if v.HasField("vehicle"):
                     timestamp = v.timestamp
-                    route_id = (
-                        v.trip.route_id if v.trip.HasField("route_id") else None
-                    )
+                    route_id = v.trip.route_id if v.trip.HasField("route_id") else None
                     direction = (
-                        v.trip.direction_id
-                        if v.trip.HasField("direction_id")
-                        else None
+                        v.trip.direction_id if v.trip.HasField("direction_id") else None
                     )
                     license_plate = v.vehicle.license_plate
                     gps = v.position
@@ -80,9 +78,9 @@ class GTFSRTManager:
                         longitude=gps.longitude,
                         bearing=gps.bearing,
                         license_plate=license_plate,
-                        timestamp=datetime.datetime.fromtimestamp(
-                            timestamp
-                        ).astimezone(timezone.get_current_timezone()),
+                        timestamp=datetime.datetime.fromtimestamp(timestamp).astimezone(
+                            timezone.get_current_timezone()
+                        ),
                     )
 
     def run_process(self):
