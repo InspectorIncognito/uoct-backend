@@ -7,12 +7,14 @@ from django.http import JsonResponse, StreamingHttpResponse
 from django.utils import timezone
 from geojson import Feature, FeatureCollection, Point
 from gtfs_rt.processors.speed import calculate_speed
-from gtfs_rt.utils import (
-    get_last_temporal_range,
-    get_last_temporal_segment,
-    get_previous_month,
-)
+from gtfs_rt.utils import get_last_temporal_range, get_previous_month
 from processors.models.shapes import shapes_to_geojson
+from rest_framework import generics, mixins, viewsets
+from rest_framework.filters import OrderingFilter
+from rest_framework.permissions import AllowAny
+from velocity.grid import GridManager
+from velocity.gtfs import GTFSManager
+
 from rest_api.models import (
     Alert,
     AlertThreshold,
@@ -41,11 +43,6 @@ from rest_api.serializers import (
     StopSerializer,
     TrafficSignalSerializer,
 )
-from rest_framework import generics, mixins, viewsets
-from rest_framework.permissions import AllowAny
-from rest_framework.response import Response
-from velocity.grid import GridManager
-from velocity.gtfs import GTFSManager
 
 
 class TestView(generics.GenericAPIView):
@@ -125,6 +122,18 @@ class GenericSpeedViewSet(viewsets.ModelViewSet, mixins.ListModelMixin):
     serializer_class = None
     queryset = None
 
+    filter_backends = [OrderingFilter]  # Add to existing backends if you have any
+    ordering_fields = [
+        "segment__shape",
+        "segment__sequence",
+        "temporal_segment",
+        "day_type",
+        "distance",
+        "time_secs",
+        "timestamp",
+    ]
+    ordering = ["segment", "temporal_segment"]  # Default ordering
+
     def get_queryset(self):
         queryset = self.queryset
         start_time = self.request.query_params.get("startTime")
@@ -150,7 +159,8 @@ class GenericSpeedViewSet(viewsets.ModelViewSet, mixins.ListModelMixin):
             queryset = queryset.filter(day_type=day_type)
         if temporal_segment is not None:
             queryset = queryset.filter(temporal_segment=temporal_segment)
-        queryset = queryset.order_by("segment", "temporal_segment")
+        if not self.request.query_params.get("ordering"):
+            queryset = queryset.order_by("segment", "temporal_segment")
         return queryset
 
     @staticmethod
@@ -167,6 +177,18 @@ class GenericSpeedViewSet(viewsets.ModelViewSet, mixins.ListModelMixin):
 class SpeedViewSet(GenericSpeedViewSet):
     serializer_class = SpeedSerializer
     queryset = Speed.objects.all().order_by("-temporal_segment")
+
+    filter_backends = [OrderingFilter]  # Add to existing backends if you have any
+    ordering_fields = [
+        "segment__shape",
+        "segment__sequence",
+        "temporal_segment",
+        "day_type",
+        "distance",
+        "time_secs",
+        "timestamp",
+    ]
+    ordering = ["-timestamp"]  # Default ordering
 
     def to_csv(self, request, *args, **kwargs):
         query_params = request.query_params
