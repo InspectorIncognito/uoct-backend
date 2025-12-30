@@ -8,9 +8,10 @@ from geojson.feature import Feature
 from geojson.geometry import LineString
 from gtfs_rt.utils import get_day_type, get_last_temporal_range, get_temporal_segment
 from processors.geometry.point import Point
-from rest_api.vars import SPEED_COLOR_RANGES
 from shapely.geometry import LineString as shp_LineString
 from velocity.constants import DEG_PI, DEG_PI_HALF
+
+from rest_api.vars import SPEED_COLOR_RANGES
 
 
 class Shape(models.Model):
@@ -24,7 +25,6 @@ class Shape(models.Model):
         return Segment.objects.filter(shape=self).order_by("sequence")
 
     def get_segments_gdf(self):
-
         segments = self.get_segments()
         if len(segments) == 0:
             return gpd.GeoDataFrame()
@@ -152,9 +152,11 @@ class Segment(models.Model):
             if alert:
                 properties["alert_id"] = alert.pk
             properties.update(speed.check_value())
+            properties["active_services"] = speed.services
         else:
             properties["speed"] = "Sin registro"
             properties["color"] = "#DDDDDD"
+            properties["active_services"] = []
 
         historic_speed = (
             HistoricSpeed.objects.filter(
