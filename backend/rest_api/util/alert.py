@@ -153,9 +153,9 @@ def create_alert_to_admin(site_manager: TranSappSiteManager, alert_obj: Alert):
     alert_data = create_alert_data(segment, speed)
     print("Creating alert with data:", alert_data)
     res = site_manager.create_alert(alert_data)
-    print(f"Create alert response: {res.status_code}, {res.text}")
     if res.status_code != 200:
         return None
+    print("Alert created successfully.")
     return res
 
 
@@ -165,28 +165,39 @@ def update_alert_from_admin(
     alert_data: dict,
     activated=True,
 ):
+    print("Updating alert with data:", alert_data)
     segment = alert_obj.segment
     speed = alert_obj.detected_speed
     alert_public_id = alert_data["public_id"]
 
-    new_end = get_santiago_time().strftime("%m/%d/%Y")
-    delta = timedelta(minutes=20)
-    new_end_time_day = (
-        datetime.datetime.strptime(alert_data["end_time_day"], "%H:%M:%S") + delta
-    ).strftime("%H:%M:%S")
+    # Create fresh alert data based on current time for time-related fields
+    fresh_alert_data = create_alert_data(segment, speed)
 
-    alert_data = create_alert_data(segment, speed)
-    new_alert_data = dict(
-        name=alert_data["name"],
-        start=alert_data["start"],
-        end=new_end,
-        start_time_day=alert_data["start_time_day"],
-        end_time_day=new_end_time_day,
-        activated=activated,
-    )
-    alert_data.update(new_alert_data)
+    # Prepare update payload starting with existing site alert data
+    update_payload = {
+        "name": fresh_alert_data["name"],
+        "message": fresh_alert_data["message"],
+        "stops": fresh_alert_data["stops"],
+        "author": fresh_alert_data["author"],
+        # Update time-related fields with fresh values
+        "start": fresh_alert_data["start"],
+        "end": fresh_alert_data["end"],
+        "start_time_day": fresh_alert_data["start_time_day"],
+        "end_time_day": fresh_alert_data["end_time_day"],
+        # Preserve day selection from fresh data
+        **{day: fresh_alert_data.get(day, "") for day in DAYS},
+        # Control activation
+        "activated": "on" if activated else "",
+    }
 
-    return site_manager.update_alert(alert_data, alert_id=alert_public_id)
+    res = site_manager.update_alert(update_payload, alert_id=alert_public_id)
+    if res.status_code != 200:
+        print("Failed to update alert.")
+        print(f"Status: {res.status_code}, Response: {res.text}")
+        print("=" * 30)
+        return None
+    print("Alert updated successfully.")
+    return res
 
 
 def create_alert_data(segment: Segment, speed: Speed):
@@ -199,6 +210,7 @@ def create_alert_data(segment: Segment, speed: Speed):
     for idx, day in enumerate(DAYS):
         if idx == weekday:
             alert_data[day] = "on"
+    # Set date range: yesterday to tomorrow to ensure alert is valid
     alert_data["start"] = (now - timedelta(days=1)).strftime("%m/%d/%Y")
     alert_data["end"] = (now + timedelta(days=1)).strftime("%m/%d/%Y")
 
@@ -308,10 +320,11 @@ def update_alerts(
     alerts = Alert.objects.filter(
         timestamp__gte=start_time,
         timestamp__lte=end_time,
-        temporal_segment=temporal_segment,
     )
     alert_data = site_manager.get_all_alerts()
 
+    if alerts.count() == 0:
+        print("No alerts to update.")
     for alert in alerts:
         segment_uuid = alert.segment.segment_id
         site_alert = search_alert_by_uuid(alert_data, segment_uuid)
@@ -347,7 +360,8 @@ def update_alerts(
 
 
 def get_active_alerts():
-    end_time = get_santiago_time()
+    # Use UTC time for database queries since Alert.timestamp is stored in UTC
+    end_time = timezone.now()
     start_time = end_time - timedelta(minutes=15)
     alerts = Alert.objects.filter(
         timestamp__gte=start_time,
