@@ -119,6 +119,12 @@ EJES_PRINCIPALES = {
             "Avenida Recoleta",
         ],
     },
+    "Eje San Pablo": {
+        "city": "Provincia de Santiago",
+        "streets": [
+            "San Pablo",
+        ],
+    },
 }
 
 # VESPUCIO_NORTE_OVERPASS_QUERY = """relation(6582778);
