@@ -226,3 +226,23 @@ DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"
 
 USE_X_FORWARDED_HOST = True
 SECURE_PROXY_SSL_HEADER = ("HTTP_X_FORWARDED_PROTO", "https")
+
+# =============================================================================
+# HMM MAP MATCHING PARALLELIZATION SETTINGS
+# =============================================================================
+# Number of worker processes for parallel HMM map matching.
+# - Set to 0 or 1 to disable parallelization (serial processing)
+# - Set to 'auto' or leave unset to auto-detect (cpu_count - 1, max 8)
+# - For EC2 t3.medium (2 vCPU): use 2
+# - For EC2 t3.large/c5.large (2-4 vCPU): use 4
+# - For EC2 c5.2xlarge (8 vCPU): use 6-8
+HMM_NUM_WORKERS = config("HMM_NUM_WORKERS", default="auto")
+
+# Minimum expeditions required to trigger parallel processing.
+# Below this threshold, serial processing is used (overhead not worth it).
+HMM_PARALLEL_MIN_EXPEDITIONS = config(
+    "HMM_PARALLEL_MIN_EXPEDITIONS", cast=int, default=50
+)
+
+# Enable verbose logging for HMM parallel processing (performance stats)
+HMM_PARALLEL_VERBOSE = config("HMM_PARALLEL_VERBOSE", cast=bool, default=True)

@@ -20,6 +20,13 @@ REDIS_HOST=cache
 REDIS_PORT=6379
 REDIS_DB=0
 
+# HMM Parallelization settings (for calculate_speed command)
+# Options: 'auto' (default - uses cpu_count-1, max 8), or a number (e.g., 4)
+# EC2 t3.medium: use 2, t3.large/c5.large: use 4, c5.2xlarge: use 6-8
+HMM_NUM_WORKERS=auto
+HMM_PARALLEL_MIN_EXPEDITIONS=50
+HMM_PARALLEL_VERBOSE=True
+
 PROTO_URL=https://transapp-prod-bucket.s3.us-east-2.amazonaws.com/routemanager/santiago_sonda.proto
 GTFS_URL=https://www.dtpm.cl/descargas/gtfs/GTFS_20250802.zip
 TRANSAPP_HOST=admin.app.transapp.cl
