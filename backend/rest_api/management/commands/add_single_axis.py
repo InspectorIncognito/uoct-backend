@@ -1,0 +1,57 @@
+from django.core.management.base import BaseCommand
+from processors.osm.process import process_single_axis
+
+from rest_api.models import Axles
+
+
+class Command(BaseCommand):
+    help = "Add a single axis without deleting existing data"
+
+    def add_arguments(self, parser):
+        parser.add_argument(
+            "axis_name",
+            type=str,
+            help="Name of the axis to add (must exist in Axles table or EJES_PRINCIPALES)",
+        )
+        parser.add_argument(
+            "--distance_threshold",
+            type=float,
+            default=500.0,
+            help="Distance in meters to segment shapes (default: 500.0)",
+        )
+
+    def handle(self, *args, **options):
+        axis_name = options["axis_name"]
+        distance_threshold = options.get("distance_threshold", 500.0)
+
+        self.stdout.write(f"Adding axis: {axis_name}")
+
+        # First check if axis exists in Axles table
+        try:
+            axle = Axles.objects.get(name=axis_name)
+            self.stdout.write(
+                self.style.SUCCESS(f"Found axis in database: {axis_name}")
+            )
+        except Axles.DoesNotExist:
+            self.stdout.write(
+                self.style.ERROR(
+                    f"Axis '{axis_name}' not found in database. "
+                    f"Run 'python manage.py create_axles_db' first to populate Axles table."
+                )
+            )
+            return
+
+        try:
+            # Process just this axis
+            process_single_axis(
+                axis_name=axis_name,
+                distance_threshold=distance_threshold,
+            )
+            self.stdout.write(
+                self.style.SUCCESS(f"Successfully added axis: {axis_name}")
+            )
+        except Exception as e:
+            self.stdout.write(
+                self.style.ERROR(f"Error adding axis '{axis_name}': {str(e)}")
+            )
+            raise

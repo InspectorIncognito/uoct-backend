@@ -1,5 +1,4 @@
 import itertools
-import json
 import math
 import os
 from typing import Dict, List, Optional
@@ -7,26 +6,17 @@ from typing import Dict, List, Optional
 import geopandas as gpd
 import networkx as nx
 import pandas as pd
-from config.paths import FIXTURE_PATH
 from haversine import Unit, haversine
-from networkx import Graph
-from processors.geometry.point import Point as p
-from processors.geometry.utils import interpolate_points_by_distance
-from processors.osm.query import (
-    INDEPENDENCIA_QUERY,
-    VESPUCIO_ORIENTE_OVERPASS_QUERY,
-    VESPUCIO_QUERY,
-    VESPUCIO_SUR_OVERPASS_QUERY,
-    OSMDownloader,
-)
-from pyproj.crs import CRS
-from rest_api.models import Axles, Segment, Shape
+from rest_api.models import Axles, Shape
 from rest_api.util.shape import flush_shape_objects
 from shapely import Point
 from shapely.geometry import LineString as shp_LineString
 from shapely.geometry import MultiLineString as shp_MultiLineString
-from shapely.geometry import Point as shp_Point
-from shapely.ops import linemerge, snap, unary_union
+from shapely.ops import linemerge, unary_union
+
+from processors.geometry.point import Point as p
+from processors.geometry.utils import interpolate_points_by_distance
+from processors.osm.query import INDEPENDENCIA_QUERY, VESPUCIO_QUERY, OSMDownloader
 
 
 def bearing_from_coords(a, b) -> float:
@@ -1048,3 +1038,55 @@ def process_shape_data(
         segmented_shapes.append(segmented)
     print("Saving all segmented shapes to DB...")
     save_all_segmented_shapes_to_db(segmented_shapes, flush=flush, shape_name=axis_name)
+
+
+def process_single_axis(
+    axis_name: str,
+    distance_threshold: float = 500.0,
+):
+    """
+    Process a single axis without deleting existing data.
+    First removes any existing shapes with the same name, then adds the new axis.
+
+    Parameters
+    ----------
+    axis_name : str
+        Name of the axis to process (must exist in Axles table)
+    distance_threshold : float
+        Distance in meters to segment shapes (default: 500.0)
+    """
+    osm_downloader = OSMDownloader()
+
+    # Get axis configuration from database
+    try:
+        axle = Axles.objects.get(name=axis_name)
+        axis_config = {"city": axle.city, "streets": axle.streets}
+    except Axles.DoesNotExist:
+        raise ValueError(f"Axis '{axis_name}' not found in Axles table")
+
+    # Remove existing shapes for this axis (both directions)
+    existing_shapes = Shape.objects.filter(name__startswith=f"{axis_name}_")
+    if existing_shapes.exists():
+        print(f"Removing {existing_shapes.count()} existing shapes for {axis_name}")
+        for shape in existing_shapes:
+            # Remove segments and related data for this shape
+            shape.segment_set.all().delete()
+        existing_shapes.delete()
+
+    # Download OSM data
+    try:
+        if axis_name == "Eje Américo Vespucio":
+            query = VESPUCIO_QUERY
+        elif axis_name == "Eje Independencia":
+            query = INDEPENDENCIA_QUERY
+        else:
+            query = osm_downloader.build_overpass_query(
+                place=axis_config["city"],
+                streets=axis_config["streets"],
+            )
+        axis = osm_downloader.execute_query(query)
+    except Exception as e:
+        raise Exception(f"Error downloading axis '{axis_name}': {e}")
+
+    # Process the axis (flush=False to keep other data)
+    process_shape_data(axis_name, axis, distance_threshold, flush=False)
