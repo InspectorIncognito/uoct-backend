@@ -6,11 +6,7 @@ from django.db.models.functions import Round
 from django.http import JsonResponse, StreamingHttpResponse
 from django.utils import timezone
 from geojson import Feature, FeatureCollection, Point
-from gtfs_rt.processors.speed import (
-    calculate_speed,
-    calculate_speed_parallel,
-    calculate_speed_serial,
-)
+from gtfs_rt.processors.speed import calculate_speed
 from gtfs_rt.utils import get_last_temporal_range, get_previous_month
 from processors.models.shapes import shapes_to_geojson
 from rest_framework import generics, mixins, viewsets
@@ -347,62 +343,6 @@ class GridViewSet(generics.GenericAPIView):
     def get(self, request):
         speed_records = calculate_speed()
         return JsonResponse({"speeds": speed_records})
-
-
-class ParallelSpeedViewSet(generics.GenericAPIView):
-    """
-    Endpoint for speed calculation using parallel HMM map matching.
-    Useful for performance testing and comparison.
-
-    Query params:
-        - workers: Number of workers (default: 8)
-        - include_speeds: If 'true', include speed records sample (default: false)
-        - sample_size: Number of speed records to include if include_speeds=true (default: 10)
-    """
-
-    permission_classes = [AllowAny]
-
-    def get(self, request):
-        workers = int(request.GET.get("workers", 8))
-        include_speeds = request.GET.get("include_speeds", "false").lower() == "true"
-        sample_size = int(request.GET.get("sample_size", 10))
-
-        speed_records, timing_metrics = calculate_speed_parallel(workers=workers)
-
-        response_data = {"timing": timing_metrics, "record_count": len(speed_records)}
-
-        if include_speeds:
-            # Return only a sample to avoid huge responses
-            response_data["speeds_sample"] = speed_records[:sample_size]
-
-        return JsonResponse(response_data)
-
-
-class SerialSpeedViewSet(generics.GenericAPIView):
-    """
-    Endpoint for speed calculation using serial (non-parallel) HMM map matching.
-    Useful for performance testing and comparison.
-
-    Query params:
-        - include_speeds: If 'true', include speed records sample (default: false)
-        - sample_size: Number of speed records to include if include_speeds=true (default: 10)
-    """
-
-    permission_classes = [AllowAny]
-
-    def get(self, request):
-        include_speeds = request.GET.get("include_speeds", "false").lower() == "true"
-        sample_size = int(request.GET.get("sample_size", 10))
-
-        speed_records, timing_metrics = calculate_speed_serial()
-
-        response_data = {"timing": timing_metrics, "record_count": len(speed_records)}
-
-        if include_speeds:
-            # Return only a sample to avoid huge responses
-            response_data["speeds_sample"] = speed_records[:sample_size]
-
-        return JsonResponse(response_data)
 
 
 class AlertThresholdViewSet(

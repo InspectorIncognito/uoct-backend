@@ -10,9 +10,7 @@ from rest_api.views import (
     GTFSShapeViewSet,
     GTFSStopsViewSet,
     HistoricSpeedViewSet,
-    ParallelSpeedViewSet,
     SegmentViewSet,
-    SerialSpeedViewSet,
     ServicesViewSet,
     ShapeViewSet,
     SpeedViewSet,
@@ -62,10 +60,6 @@ urlpatterns = [
         name="segments",
     ),
     path("debug/speed/", GridViewSet.as_view(), name="segments"),
-    path(
-        "debug/speed/parallel/", ParallelSpeedViewSet.as_view(), name="speed-parallel"
-    ),
-    path("debug/speed/serial/", SerialSpeedViewSet.as_view(), name="speed-serial"),
     path("debug/test/", TestView.as_view(), name="debug-test"),
     path(
         "traffic_signal/",
