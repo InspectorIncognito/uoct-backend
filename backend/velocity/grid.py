@@ -1108,7 +1108,10 @@ class GridManager(Dict[Tuple[int, int], GridCell]):
 
             vehicle_data, expedition = expedition_map[result.expedition_id]
 
-            # Process each matched axis
+            # Process each matched axis sequentially, matching serial behavior
+            # Note: In serial version, the 'expedition' variable gets reused in the inner loop,
+            # so only the last expedition from a split continues to subsequent axes.
+            # We replicate this behavior here.
             for axis_id, (
                 matched_segments,
                 valid_indices,
@@ -1136,14 +1139,15 @@ class GridManager(Dict[Tuple[int, int], GridCell]):
                     if new_set is None:
                         continue
 
+                    # Process results and update expedition variable (like serial does)
                     for (
-                        exp,
+                        expedition,  # Reuse variable like serial version
                         valid_id,
                         matched_seg,
                         proj_points,
                     ) in new_set.values():
                         self._update_expedition_from_hmm_results(
-                            exp,
+                            expedition,
                             matched_seg,
                             valid_id,
                             proj_points,

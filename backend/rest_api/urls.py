@@ -1,4 +1,6 @@
-from django.urls import include, path
+from django.urls import path
+from rest_framework.routers import DefaultRouter
+
 from rest_api.views import (
     AlertViewSet,
     AxlesViewSet,
@@ -8,7 +10,9 @@ from rest_api.views import (
     GTFSShapeViewSet,
     GTFSStopsViewSet,
     HistoricSpeedViewSet,
+    ParallelSpeedViewSet,
     SegmentViewSet,
+    SerialSpeedViewSet,
     ServicesViewSet,
     ShapeViewSet,
     SpeedViewSet,
@@ -16,12 +20,11 @@ from rest_api.views import (
     TestView,
     TrafficSignalViewSet,
 )
-from rest_framework.routers import DefaultRouter
 
 # Wire up our API using automatic URL routing.
 # Additionally, we include login URLs for the browsable API.
 router = DefaultRouter()
-router.register(r'axles', AxlesViewSet, basename='axles')
+router.register(r"axles", AxlesViewSet, basename="axles")
 urlpatterns = [
     path("mapData/", GeoJSONViewSet.as_view(), name="mapData"),
     path("shape/", ShapeViewSet.as_view({"get": "list"}), name="shape"),
@@ -59,7 +62,15 @@ urlpatterns = [
         name="segments",
     ),
     path("debug/speed/", GridViewSet.as_view(), name="segments"),
+    path(
+        "debug/speed/parallel/", ParallelSpeedViewSet.as_view(), name="speed-parallel"
+    ),
+    path("debug/speed/serial/", SerialSpeedViewSet.as_view(), name="speed-serial"),
     path("debug/test/", TestView.as_view(), name="debug-test"),
-    path("traffic_signal/", TrafficSignalViewSet.as_view({"get": "list"}), name="traffic_signal"),
+    path(
+        "traffic_signal/",
+        TrafficSignalViewSet.as_view({"get": "list"}),
+        name="traffic_signal",
+    ),
     path("camera/", CameraViewSet.as_view({"get": "list"}), name="camera"),
 ] + router.urls
