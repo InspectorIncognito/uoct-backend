@@ -24,11 +24,11 @@ def apply_mad_filter(
     Apply MAD (Median Absolute Deviation) filtering by group to:
     - Remove hard outliers (z > z_outlier) that are likely sensor errors
     - Flag possible incidents (z > z_incident) for downstream alert processing
-    
+
     MAD is more robust than standard deviation for speed data with outliers.
     Possible incidents are kept in the returned data since they may represent
     real traffic conditions needed for alert generation.
-    
+
     Args:
         df: DataFrame with speed data
         group_cols: Columns to group by (e.g., shape_id, segment indices)
@@ -36,14 +36,14 @@ def apply_mad_filter(
         z_incident: Z-score threshold for flagging incidents (default 3.0)
         z_outlier: Z-score threshold for removing outliers (default 4.5)
         min_group_size: Minimum group size for filtering (default 5)
-    
+
     Returns:
         tuple: (df_filtered, df_outliers)
             - df_filtered: Data with outliers removed (includes normal + possible_incident)
             - df_outliers: Hard outliers removed from data (z > z_outlier)
     """
     df = df.copy()
-    
+
     # Initialize diagnostic columns
     df["median_speed"] = np.nan
     df["mad"] = np.nan
@@ -55,40 +55,42 @@ def apply_mad_filter(
         # Filter out NaN/infinite speeds first
         valid_mask = group[speed_col].notna() & np.isfinite(group[speed_col])
         n_valid = valid_mask.sum()
-        
+
         # Mark groups with insufficient data
         if n_valid < min_group_size:
             group.loc[valid_mask, "status"] = "insufficient_data"
             return group
-        
+
         valid_speeds = group.loc[valid_mask, speed_col]
-        
+
         # Calculate MAD statistics
         median = valid_speeds.median()
         mad = np.median(np.abs(valid_speeds - median))
-        
+
         # Avoid division by zero - if MAD=0, all values are identical
         if mad == 0 or np.isnan(mad):
             group.loc[valid_mask, "median_speed"] = median
             group.loc[valid_mask, "mad"] = mad
             group.loc[valid_mask, "z_mad"] = 0.0
             return group
-        
+
         # Calculate modified Z-scores (1.4826 converts MAD to ~std deviation)
         z_scores = np.abs(valid_speeds - median) / (1.4826 * mad)
-        
+
         # Assign statistics to valid rows
         group.loc[valid_mask, "median_speed"] = median
         group.loc[valid_mask, "mad"] = mad
         group.loc[valid_mask, "z_mad"] = z_scores.values
-        
+
         # Classify observations
         outlier_mask = valid_mask & (group["z_mad"] > z_outlier)
-        incident_mask = valid_mask & (group["z_mad"] > z_incident) & (group["z_mad"] <= z_outlier)
-        
+        incident_mask = (
+            valid_mask & (group["z_mad"] > z_incident) & (group["z_mad"] <= z_outlier)
+        )
+
         group.loc[outlier_mask, "status"] = "outlier"
         group.loc[incident_mask, "status"] = "possible_incident"
-        
+
         return group
 
     # Apply MAD processing to each group
@@ -97,18 +99,20 @@ def apply_mad_filter(
     # Keep everything except hard outliers (normal + possible_incident)
     df_filtered = df[df["status"] != "outlier"].copy()
     df_outliers = df[df["status"] == "outlier"].copy()
-    
+
     # Count by status for reporting
     n_normal = (df["status"] == "normal").sum()
     n_incidents = (df["status"] == "possible_incident").sum()
     n_outliers = len(df_outliers)
     n_insufficient = (df["status"] == "insufficient_data").sum()
-    
+
     # Log summary statistics
-    print(f"MAD Filter Results:")
-    print(f"  - Normal observations: {n_normal} ({100*n_normal/len(df):.1f}%)")
-    print(f"  - Possible incidents (flagged): {n_incidents} ({100*n_incidents/len(df):.1f}%)")
-    print(f"  - Outliers removed: {n_outliers} ({100*n_outliers/len(df):.1f}%)")
+    print("MAD Filter Results:")
+    print(f"  - Normal observations: {n_normal} ({100 * n_normal / len(df):.1f}%)")
+    print(
+        f"  - Possible incidents (flagged): {n_incidents} ({100 * n_incidents / len(df):.1f}%)"
+    )
+    print(f"  - Outliers removed: {n_outliers} ({100 * n_outliers / len(df):.1f}%)")
     print(f"  - Insufficient data: {n_insufficient}")
     print(f"  - Retained for processing: {len(df_filtered)} records")
 
@@ -185,17 +189,19 @@ def calculate_speed(
             "local_temporal_segment_index",
         ],
         speed_col="speed(km/h)",
-        z_incident=3.0,      # Flag speeds >3 MAD from median as possible incidents
-        z_outlier=4.5,       # Remove speeds >4.5 MAD from median as hard outliers
-        min_group_size=5,    # Need at least 5 observations for reliable statistics
+        z_incident=3.0,  # Flag speeds >3 MAD from median as possible incidents
+        z_outlier=4.5,  # Remove speeds >4.5 MAD from median as hard outliers
+        min_group_size=5,  # Need at least 5 observations for reliable statistics
     )
-    
+
     # Note: df now contains normal observations + flagged incidents (status column preserved)
     # Incidents are kept because they may represent real slow traffic needed for alerts
-    
+
     # Drop MAD diagnostic columns before DB insertion (they're not part of Speed model)
     # Keep them in df if you want to export for analysis later
-    df_to_save = df.drop(columns=["median_speed", "mad", "z_mad", "status"], errors='ignore')
+    df_to_save = df.drop(
+        columns=["median_speed", "mad", "z_mad", "status"], errors="ignore"
+    )
 
     for row, data in df_to_save.iterrows():
         shape_id = data["shape_id"]
