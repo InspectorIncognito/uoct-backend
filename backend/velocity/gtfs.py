@@ -255,7 +255,5 @@ class GTFSManager:
         stops_df = self.stops_reader.load_csv_file_as_df()
         stops_df = stops_df.drop(columns=["stop_code", "location_type"])
 
-        # Save df to a csv file for debugging
-        stops_df.to_csv("stops.csv", index=False)
         stops_df = stops_df[["stop_id", "stop_lat", "stop_lon"]]
         self.segment_manager.assign_stops_for_each_segment(stops_df)
