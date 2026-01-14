@@ -20,3 +20,4 @@ pandas
 geopandas
 jinja2
 scipy
+beautifulsoup4

@@ -1,4 +1,5 @@
 from django.core.management import BaseCommand
+
 from rest_api.util.stops import assign_stops_to_segments, flush_stops_from_db
 
 

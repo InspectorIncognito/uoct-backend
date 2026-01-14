@@ -1,9 +1,4 @@
-import geopandas as gpd
-from django.core.management import BaseCommand, CommandError
-from rest_api.models import GTFSShape, Segment, Shape
-from rest_api.util.gtfs import GTFSShapeManager
-from shapely import to_geojson
-from shapely.geometry import LineString as shp_LineString
+from django.core.management import BaseCommand
 from velocity.gtfs import GTFSManager
 
 

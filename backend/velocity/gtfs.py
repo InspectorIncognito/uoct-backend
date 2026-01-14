@@ -1,24 +1,14 @@
 """Module for reading GTFS files and returning them as a dictionary."""
 
-import codecs
-import csv
-import itertools
-import uuid
-import zipfile
-from io import BytesIO, TextIOWrapper
-from pathlib import Path
+from io import BytesIO
 from typing import IO
-from zipfile import BadZipFile, ZipExtFile, ZipFile
+from zipfile import BadZipFile, ZipFile
 
-import geopandas as gpd
 import pandas as pd
 import requests
 from decouple import config
-from geojson import Feature, FeatureCollection, LineString
 from rest_api.util.gtfs import GTFSShape, flush_gtfs_shape_objects
 from rest_api.util.segment import SegmentManager
-from shapely.geometry import LineString as shp_LineString
-from velocity.constants import DELIMITER, ENCODING, QUOTECHAR
 
 
 class GTFSFileReader:
@@ -119,8 +109,14 @@ class RoutesReader(GTFSFileReader):
 
 
 class GTFSManager:
-    def __init__(self):
-        self.gtfs_url = config("GTFS_URL")
+    def __init__(self, gtfs_url: str = None):
+        """
+        Initialize GTFSManager.
+
+        Args:
+            gtfs_url: Optional GTFS URL to download from. If None, uses GTFS_URL from config.
+        """
+        self.gtfs_url = gtfs_url if gtfs_url else config("GTFS_URL")
         self.gtfs_zip = self.__download_gtfs_data()
 
         self.shapes_reader = ShapesReader(self.gtfs_zip)

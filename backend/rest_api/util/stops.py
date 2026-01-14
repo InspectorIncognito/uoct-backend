@@ -1,5 +1,6 @@
-from rest_api.models import Stop
 from velocity.gtfs import GTFSManager
+
+from rest_api.models import Stop
 
 
 def flush_stops_from_db():

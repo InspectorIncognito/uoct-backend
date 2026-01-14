@@ -1,8 +1,15 @@
+import shutil
 from datetime import datetime, timedelta
+from pathlib import Path
+from urllib.parse import urljoin
 
 import numpy as np
 import pytz
+import requests
+from bs4 import BeautifulSoup
+from decouple import config
 from django.utils import timezone
+
 from gtfs_rt.models import GPSPulse
 
 MAD_CONST = 1.4826
@@ -82,3 +89,105 @@ def get_previous_month():
 def flush_gps_pulses():
     print("Calling flush_gps_pulses command...")
     GPSPulse.objects.all().delete()
+
+
+def get_gtfs_vigente_download_url(timeout: int = 15) -> str:
+    """Scrape the DTPM website to find the current GTFS download URL."""
+    DTPM_GTFS_URL = config("DTPM_GTFS_URL")
+    response = requests.get(DTPM_GTFS_URL, timeout=timeout)
+    response.raise_for_status()
+
+    soup = BeautifulSoup(response.text, "html.parser")
+
+    links = soup.find_all("a", href=True)
+
+    for link in links:
+        href = link["href"].lower()
+        text = link.get_text(strip=True).lower()
+
+        if href.endswith(".zip") and "gtfs" in href:
+            return urljoin(DTPM_GTFS_URL, link["href"])
+
+        if href.endswith(".zip") and "gtfs" in text:
+            return urljoin(DTPM_GTFS_URL, link["href"])
+
+    raise RuntimeError("No se encontró el link del GTFS vigente")
+
+
+def download_gtfs_zip(download_url: str, output_dir: Path) -> Path:
+    """Download the GTFS zip file from the given URL."""
+    output_dir.mkdir(parents=True, exist_ok=True)
+
+    filename = download_url.split("/")[-1]
+    output_path = output_dir / filename
+
+    with requests.get(download_url, stream=True, timeout=30) as r:
+        r.raise_for_status()
+        with open(output_path, "wb") as f:
+            shutil.copyfileobj(r.raw, f)
+
+    return output_path
+
+
+def get_current_gtfs_url() -> str:
+    """
+    Get the current GTFS URL by scraping DTPM website.
+    Falls back to GTFS_URL from environment if scraping fails.
+
+    Returns:
+        str: URL to download the current GTFS zip file.
+    """
+
+    try:
+        print("Buscando GTFS vigente en DTPM...")
+        gtfs_url = get_gtfs_vigente_download_url()
+        print(f"URL encontrada: {gtfs_url}")
+        return gtfs_url
+    except Exception as e:
+        print(f"No se pudo obtener URL del sitio DTPM: {str(e)}")
+        fallback_url = config("GTFS_URL")
+        print(f"Usando URL de fallback: {fallback_url}")
+        return fallback_url
+
+
+def update_gtfs_data():
+    """Update GTFS shapes and stops using the current GTFS URL."""
+
+    print("Iniciando actualización de datos GTFS...")
+
+    try:
+        # Get the current GTFS URL
+        gtfs_url = get_current_gtfs_url()
+
+        # Import here to avoid circular imports
+        from rest_api.util.services import (
+            assign_routes_to_segments,
+            flush_services_from_db,
+        )
+        from rest_api.util.stops import assign_stops_to_segments, flush_stops_from_db
+        from velocity.gtfs import GTFSManager
+
+        # Update shapes
+        print("Actualizando shapes del GTFS...")
+        gtfs_manager = GTFSManager(gtfs_url=gtfs_url)
+        processed_shapes = gtfs_manager.get_processed_shapes()
+        gtfs_manager.save_gtfs_shapes_to_db(processed_shapes)
+        print("Shapes actualizados")
+
+        # Update routes/services
+        print("Actualizando rutas/servicios del GTFS...")
+        flush_services_from_db()
+        assign_routes_to_segments()
+        print("Rutas/servicios actualizados")
+
+        # Update stops
+        print("Actualizando stops del GTFS...")
+        flush_stops_from_db()
+        assign_stops_to_segments()
+        print("Stops actualizados")
+
+        print("Actualización de GTFS completada exitosamente")
+
+    except Exception as e:
+        print(f"Error durante la actualización del GTFS: {str(e)}")
+        raise

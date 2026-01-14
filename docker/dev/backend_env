@@ -26,6 +26,7 @@ REDIS_DB=0
 
 PROTO_URL=https://transapp-prod-bucket.s3.us-east-2.amazonaws.com/routemanager/santiago_sonda.proto
 GTFS_URL=https://www.dtpm.cl/descargas/gtfs/GTFS_20250802.zip
+DTPM_GTFS_URL=https://www.dtpm.cl/index.php/noticias/gtfs-vigente
 
 TRANSAPP_HOST=admin.app.transapp.cl
 TRANSAPP_SITE_USERNAME=notifier
