@@ -1,5 +1,6 @@
 import shutil
 from datetime import datetime, timedelta
+from functools import lru_cache
 from pathlib import Path
 from urllib.parse import urljoin
 
@@ -51,12 +52,27 @@ def get_temporal_range(temporal_segment, reference_datetime=None):
     return start_time, end_time
 
 
-def get_last_temporal_range():
+@lru_cache(maxsize=1)
+def _get_last_temporal_range_cached(minute_key):
+    """
+    Internal cached version of get_last_temporal_range.
+    Uses minute_key to invalidate cache every minute.
+    """
     delta = timedelta(minutes=15)
     now = timezone.now()
     last_15_minutes = now - delta
     last_temporal_segment = get_temporal_segment(last_15_minutes)
     return get_temporal_range(last_temporal_segment, reference_datetime=last_15_minutes)
+
+
+def get_last_temporal_range():
+    """
+    Get the last temporal range (15-minute window).
+    Cached for 1 minute to avoid redundant calculations.
+    """
+    # Use current minute as cache key - cache expires every minute
+    minute_key = timezone.now().replace(second=0, microsecond=0)
+    return _get_last_temporal_range_cached(minute_key)
 
 
 def get_last_temporal_segment():

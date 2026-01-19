@@ -80,8 +80,14 @@ class Shape(models.Model):
         ]
 
     def to_geojson(self):
-        segments = Segment.objects.filter(shape=self).all()
-        if len(segments) == 0:
+        # Use prefetched segments if available, otherwise query
+        if hasattr(self, "segment_set") and hasattr(self.segment_set, "all"):
+            # Check if segment_set was prefetched (will have _result_cache)
+            segments = self.segment_set.all()
+        else:
+            segments = Segment.objects.filter(shape=self).order_by("sequence")
+
+        if not segments:
             return {}
         geojson = [segment.to_geojson() for segment in segments]
         return geojson
@@ -136,43 +142,80 @@ class Segment(models.Model):
             shape_id=self.shape.pk,
             sequence=self.sequence,
         )
-        start_time, end_time = get_last_temporal_range()
-        temporal_segment = get_temporal_segment(start_time)
-        day_type = get_day_type(start_time)
-        speed = Speed.objects.filter(
-            segment=self,
-            timestamp__date=start_time.date(),
-            temporal_segment=temporal_segment,
-        ).first()
+
+        # Use prefetched data if available, otherwise fall back to database queries
+        if hasattr(self, "prefetched_speeds"):
+            speed = self.prefetched_speeds[0] if self.prefetched_speeds else None
+        else:
+            start_time, end_time = get_last_temporal_range()
+            temporal_segment = get_temporal_segment(start_time)
+            speed = Speed.objects.filter(
+                segment=self,
+                timestamp__date=start_time.date(),
+                temporal_segment=temporal_segment,
+            ).first()
+
+        # Use prefetched historic speeds if available
+        if hasattr(self, "prefetched_historic_speeds"):
+            historic_speed = (
+                self.prefetched_historic_speeds[0]
+                if self.prefetched_historic_speeds
+                else None
+            )
+        else:
+            start_time, end_time = get_last_temporal_range()
+            temporal_segment = get_temporal_segment(start_time)
+            day_type = get_day_type(start_time)
+            historic_speed = (
+                HistoricSpeed.objects.filter(
+                    segment=self, day_type=day_type, temporal_segment=temporal_segment
+                )
+                .order_by("-timestamp")
+                .first()
+            )
 
         if speed:
-            alert = Alert.objects.filter(
-                segment=self, temporal_segment=speed.temporal_segment
-            ).first()
+            # Use prefetched alerts if available
+            if hasattr(self, "prefetched_alerts"):
+                alert = next(
+                    (
+                        a
+                        for a in self.prefetched_alerts
+                        if a.temporal_segment == speed.temporal_segment
+                    ),
+                    None,
+                )
+            else:
+                alert = Alert.objects.filter(
+                    segment=self, temporal_segment=speed.temporal_segment
+                ).first()
+
             if alert:
                 properties["alert_id"] = alert.pk
-            properties.update(speed.check_value())
+            # Pass prefetched historic_speed to avoid redundant query in check_value
+            properties.update(
+                speed.check_value(prefetched_historic_speed=historic_speed)
+            )
             properties["active_services"] = speed.services
         else:
             properties["speed"] = "Sin registro"
             properties["color"] = "#DDDDDD"
             properties["active_services"] = []
 
-        historic_speed = (
-            HistoricSpeed.objects.filter(
-                segment=self, day_type=day_type, temporal_segment=temporal_segment
-            )
-            .order_by("-timestamp")
-            .first()
-        )
         if historic_speed:
             properties["historic_speed"] = historic_speed.speed
         else:
             properties["historic_speed"] = "Sin registro"
 
-        services = Services.objects.filter(segment=self).first()
+        # Use prefetched services if available
+        if hasattr(self, "prefetched_services"):
+            services = self.prefetched_services[0] if self.prefetched_services else None
+        else:
+            services = Services.objects.filter(segment=self).first()
+
         if services:
             properties["services"] = services.services
+
         line = shp_LineString(coordinates=self.geometry)
         line = line.simplify(tolerance=0.00001)
         feature = Feature(
@@ -207,6 +250,12 @@ class Speed(models.Model):
     timestamp = models.DateTimeField(default=timezone.now)
     services = ArrayField(models.CharField(max_length=124), blank=True, null=True)
 
+    class Meta:
+        indexes = [
+            models.Index(fields=["segment", "timestamp", "temporal_segment"]),
+            models.Index(fields=["segment", "temporal_segment"]),
+        ]
+
     # speed = models.FloatField(blank=False, null=False)
 
     def get_speed(self):
@@ -221,20 +270,26 @@ class Speed(models.Model):
                 return color
         return "#FFFFFF"
 
-    def check_value(self):
+    def check_value(self, prefetched_historic_speed=None):
         geojson_data = dict()
         geojson_data["speed"] = self.get_speed()
         geojson_data["color"] = self.assign_color()
         geojson_data["temporal_segment"] = self.temporal_segment
-        historic_speed: HistoricSpeed = (
-            HistoricSpeed.objects.filter(
-                segment=self.segment,
-                day_type=self.day_type,
-                temporal_segment=self.temporal_segment,
+
+        # Use prefetched historic_speed if provided, otherwise query
+        if prefetched_historic_speed is not None:
+            historic_speed = prefetched_historic_speed
+        else:
+            historic_speed = (
+                HistoricSpeed.objects.filter(
+                    segment=self.segment,
+                    day_type=self.day_type,
+                    temporal_segment=self.temporal_segment,
+                )
+                .order_by("-timestamp")
+                .first()
             )
-            .order_by("-timestamp")
-            .first()
-        )
+
         if historic_speed is not None:
             geojson_data["historic_speed"] = str(historic_speed.speed)
         else:
@@ -248,6 +303,13 @@ class HistoricSpeed(models.Model):
     day_type = models.CharField(max_length=1, blank=False, null=False, default="L")
     temporal_segment = models.IntegerField(blank=False, null=False, default=0)
     timestamp = models.DateTimeField(default=timezone.now)
+
+    class Meta:
+        indexes = [
+            models.Index(
+                fields=["segment", "day_type", "temporal_segment", "-timestamp"]
+            ),
+        ]
 
 
 class SingletonModel(models.Model):
@@ -288,6 +350,12 @@ class Alert(models.Model):
     useful = models.IntegerField(default=0)
     useless = models.IntegerField(default=0)
     timestamp = models.DateTimeField(default=timezone.now)
+
+    class Meta:
+        indexes = [
+            models.Index(fields=["segment", "temporal_segment"]),
+            models.Index(fields=["timestamp"]),
+        ]
 
     def get_key_value(self):
         shape = str(self.segment.shape.pk)
