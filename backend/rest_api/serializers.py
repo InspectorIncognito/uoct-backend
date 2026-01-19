@@ -1,3 +1,5 @@
+from rest_framework import serializers
+
 from rest_api.models import (
     Alert,
     AlertThreshold,
@@ -12,7 +14,6 @@ from rest_api.models import (
     Stop,
     TrafficSignal,
 )
-from rest_framework import serializers
 
 
 class ShapeSerializer(serializers.ModelSerializer):
@@ -30,6 +31,7 @@ class SegmentSerializer(serializers.ModelSerializer):
 class SpeedSerializer(serializers.ModelSerializer):
     shape = serializers.IntegerField(source="segment.shape.id", read_only=True)
     sequence = serializers.IntegerField(source="segment.sequence", read_only=True)
+    active_services = serializers.ListField(source="services", read_only=True)
 
     class Meta:
         model = Speed
@@ -41,6 +43,7 @@ class SpeedSerializer(serializers.ModelSerializer):
             "distance",
             "time_secs",
             "timestamp",
+            "active_services",
         ]
 
 
@@ -115,6 +118,7 @@ class TrafficSignalSerializer(serializers.ModelSerializer):
     class Meta:
         model = TrafficSignal
         fields = "__all__"
+
 
 class CameraSerializer(serializers.ModelSerializer):
     class Meta:

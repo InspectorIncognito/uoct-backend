@@ -47,6 +47,7 @@ from rest_api.serializers import (
 
 class TestView(generics.GenericAPIView):
     permission_classes = [AllowAny]
+    serializer_class = None  # View returns custom JSON response
 
     def get(self, request, *args, **kwargs):
         gm = GridManager()
@@ -66,6 +67,7 @@ class TestView(generics.GenericAPIView):
 
 class GeoJSONViewSet(generics.GenericAPIView):
     permission_classes = [AllowAny]
+    serializer_class = None  # View returns GeoJSON response
 
     def get(self, request):
         # Returns a GeoJSON with the latest data.
@@ -77,6 +79,7 @@ class GeoJSONViewSet(generics.GenericAPIView):
 
 class GTFSStopsViewSet(generics.GenericAPIView):
     permission_classes = [AllowAny]
+    serializer_class = None  # View returns GeoJSON response
 
     def get(self, request):
         gtfs_manager = GTFSManager()
@@ -103,6 +106,9 @@ class SegmentViewSet(viewsets.ModelViewSet):
     serializer_class = SegmentSerializer
 
     def get_queryset(self):
+        # Handle schema generation when shape_pk is not available
+        if getattr(self, "swagger_fake_view", False):
+            return Segment.objects.none()
         return Segment.objects.filter(shape__id=self.kwargs["shape_pk"]).order_by(
             "sequence"
         )
@@ -170,7 +176,11 @@ class GenericSpeedViewSet(viewsets.ModelViewSet, mixins.ListModelMixin):
             fieldnames = list(fieldnames_dict.keys())
             row = []
             for field in fieldnames:
-                row.append(str(obj[field]))
+                value = obj[field]
+                # Join list fields with semicolon to avoid CSV delimiter conflicts
+                if isinstance(value, list):
+                    value = ";".join(str(v) for v in value) if value else ""
+                row.append(str(value))
             yield ",".join(row) + "\n"
 
 
@@ -200,6 +210,7 @@ class SpeedViewSet(GenericSpeedViewSet):
             "distance",
             "time_secs",
             "timestamp",
+            "services",
         )
         if len(query_params) == 0:
             start_time, end_time = get_last_temporal_range()
@@ -215,6 +226,7 @@ class SpeedViewSet(GenericSpeedViewSet):
             distance="distance",
             time_secs="time_secs",
             timestamp="timestamp",
+            services="active_services",
         )
         response = StreamingHttpResponse(
             self.csv_generator(queryset, fieldnames_dict), content_type="text/csv"
@@ -339,6 +351,7 @@ class GTFSShapeViewSet(viewsets.ModelViewSet):
 
 class GridViewSet(generics.GenericAPIView):
     permission_classes = [AllowAny]
+    serializer_class = None  # View returns custom JSON response
 
     def get(self, request):
         speed_records = calculate_speed()

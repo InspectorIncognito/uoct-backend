@@ -1,4 +1,4 @@
-from datetime import datetime, timedelta
+from datetime import timedelta
 
 from django.db.models import ExpressionWrapper, FloatField, Sum
 from django.db.models.functions import Round
@@ -16,7 +16,10 @@ def get_month_commercial_speed(year: int, month: int):
         year=year, month=month, day=1, hour=0, minute=0, second=0, microsecond=0
     )
     last_month_speeds = Speed.objects.filter(
-        timestamp__year=year, timestamp__month=month
+        timestamp__year=year,
+        timestamp__month=month,
+        time_secs__gt=0,  # Exclude records with zero or negative time
+        distance__gt=0,  # Exclude records with zero or negative distance
     )
     avg_speeds = last_month_speeds.values(
         "segment", "day_type", "temporal_segment"
@@ -28,6 +31,7 @@ def get_month_commercial_speed(year: int, month: int):
             output_field=FloatField(),
         ),
     )
+    print(f"Calculated {len(avg_speeds)} average speeds for month {month}/{year}.")
     for avg_speed in avg_speeds:
         historic_speed_data = dict(
             segment=Segment.objects.get(pk=avg_speed["segment"]),

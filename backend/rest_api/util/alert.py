@@ -363,7 +363,8 @@ def get_active_alerts():
     # Use UTC time for database queries since Alert.timestamp is stored in UTC
     end_time = timezone.now()
     start_time = end_time - timedelta(minutes=15)
-    alerts = Alert.objects.filter(
+    # Use select_related to prefetch segment and shape in a single query
+    alerts = Alert.objects.select_related("segment", "segment__shape").filter(
         timestamp__gte=start_time,
         timestamp__lte=end_time,
     )
