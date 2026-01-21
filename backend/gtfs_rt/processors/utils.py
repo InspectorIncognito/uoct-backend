@@ -73,9 +73,10 @@ def apply_mad_filter_with_historical(
     day_type: str,
     speed_col: str = "speed(km/h)",
     z_incident: float = 3.0,
-    z_outlier: float = 4.5,
+    z_outlier: float = 5,
     fallback_min: float = 3.0,
     fallback_max: float = 90.0,
+    fallback_flag: bool = True,
 ):
     """
     Apply MAD filtering using historical data as baseline.
@@ -89,10 +90,10 @@ def apply_mad_filter_with_historical(
         day_type: Day type ('L', 'S', 'D') for historical lookup
         speed_col: Name of speed column
         z_incident: Z-score threshold for flagging incidents (default 3.0)
-        z_outlier: Z-score threshold for removing outliers (default 4.5)
+        z_outlier: Z-score threshold for removing outliers (default 5)
         fallback_min: Minimum speed when no historical data (default 3 km/h)
         fallback_max: Maximum speed when no historical data (default 90 km/h)
-
+        fallback_flag: Whether to flag outliers when using fallback bounds (default True)
     Returns:
         tuple: (df_filtered, df_outliers)
     """
@@ -143,7 +144,7 @@ def apply_mad_filter_with_historical(
         df["hist_median"].notna() & df["hist_mad"].notna() & (df["hist_mad"] > 0)
     )
 
-    if has_history.any():
+    if has_history.any() and not fallback_flag:
         # Calculate z-scores using historical baseline
         df.loc[has_history, "z_mad"] = np.abs(
             df.loc[has_history, speed_col] - df.loc[has_history, "hist_median"]
@@ -160,7 +161,7 @@ def apply_mad_filter_with_historical(
 
     # Fallback: records without historical data use simple bounds
     no_history = ~has_history
-    if no_history.any():
+    if no_history.any() or fallback_flag:
         df.loc[no_history, "filter_method"] = "fallback_bounds"
 
         # Apply simple bounds for records without history

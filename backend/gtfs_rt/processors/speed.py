@@ -2,14 +2,13 @@ import datetime
 import time
 
 import pandas as pd
+from gtfs_rt.processors.utils import apply_mad_filter_with_historical
+from gtfs_rt.utils import get_last_temporal_range
 from rest_api.models import Segment, Speed
 from velocity.grid import GridManager
 from velocity.segment import FiveHundredMeterSegmentCriteria
 from velocity.utils import generate_grid
 from velocity.vehicle import VehicleManager
-
-from gtfs_rt.processors.utils import apply_mad_filter_with_historical
-from gtfs_rt.utils import get_last_temporal_range
 
 
 def calculate_speed(
@@ -87,6 +86,7 @@ def calculate_speed(
         z_outlier=5,  # Remove speeds >5 MAD from historical median
         fallback_min=3.0,  # Minimum speed when no history (km/h)
         fallback_max=90.0,  # Maximum speed when no history (km/h)
+        fallback_flag=True,  # For now leave in True, we need more info to apply the mad filter
     )
 
     # Note: df now contains normal observations + flagged incidents (status column preserved)
