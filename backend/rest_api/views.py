@@ -186,37 +186,6 @@ class GenericSpeedViewSet(viewsets.ModelViewSet, mixins.ListModelMixin):
                 row.append(str(value))
             yield ",".join(row) + "\n"
 
-    @staticmethod
-    def csv_generator_local_tz(queryset, fieldnames_dict):
-        """Generate CSV with timestamps, temporal_segment and day_type converted to America/Santiago timezone."""
-        santiago_tz = ZoneInfo("America/Santiago")
-        yield ",".join(list(fieldnames_dict.values())) + "\n"
-        for obj in queryset:
-            fieldnames = list(fieldnames_dict.keys())
-            row = []
-            # Convert timestamp once and cache local datetime for reuse
-            local_dt = None
-            if obj.get("timestamp") is not None:
-                local_dt = obj["timestamp"].astimezone(santiago_tz)
-
-            for field in fieldnames:
-                value = obj[field]
-                if local_dt is not None:
-                    if field == "timestamp":
-                        value = local_dt.strftime("%Y-%m-%dT%H:%M:%S")
-                    elif field == "temporal_segment":
-                        # Recalculate: (hour * 60 + minute) // 15
-                        value = (local_dt.hour * 60 + local_dt.minute) // 15
-                    elif field == "day_type":
-                        # Recalculate: L (Mon-Fri), S (Sat), D (Sun)
-                        weekday = local_dt.weekday()
-                        value = "L" if weekday < 5 else ("S" if weekday == 5 else "D")
-                # Join list fields with semicolon to avoid CSV delimiter conflicts
-                if isinstance(value, list):
-                    value = ";".join(str(v) for v in value) if value else ""
-                row.append(str(value))
-            yield ",".join(row) + "\n"
-
 
 class SpeedViewSet(GenericSpeedViewSet):
     serializer_class = SpeedSerializer
@@ -302,9 +271,42 @@ class SpeedViewSet(GenericSpeedViewSet):
             self.csv_generator_local_tz(queryset, fieldnames_dict),
             content_type="text/csv",
         )
-        response["Content-Disposition"] = 'attachment; filename="segment_speeds_local.csv"'
+        response["Content-Disposition"] = (
+            'attachment; filename="segment_speeds_local.csv"'
+        )
 
         return response
+
+    @staticmethod
+    def csv_generator_local_tz(queryset, fieldnames_dict):
+        """Generate CSV with timestamps, temporal_segment and day_type converted to America/Santiago timezone."""
+        santiago_tz = ZoneInfo("America/Santiago")
+        yield ",".join(list(fieldnames_dict.values())) + "\n"
+        for obj in queryset:
+            fieldnames = list(fieldnames_dict.keys())
+            row = []
+            # Convert timestamp once and cache local datetime for reuse
+            local_dt = None
+            if obj.get("timestamp") is not None:
+                local_dt = obj["timestamp"].astimezone(santiago_tz)
+
+            for field in fieldnames:
+                value = obj[field]
+                if local_dt is not None:
+                    if field == "timestamp":
+                        value = local_dt.strftime("%Y-%m-%dT%H:%M:%S")
+                    elif field == "temporal_segment":
+                        # Recalculate: (hour * 60 + minute) // 15
+                        value = (local_dt.hour * 60 + local_dt.minute) // 15
+                    elif field == "day_type":
+                        # Recalculate: L (Mon-Fri), S (Sat), D (Sun)
+                        weekday = local_dt.weekday()
+                        value = "L" if weekday < 5 else ("S" if weekday == 5 else "D")
+                # Join list fields with semicolon to avoid CSV delimiter conflicts
+                if isinstance(value, list):
+                    value = ";".join(str(v) for v in value) if value else ""
+                row.append(str(value))
+            yield ",".join(row) + "\n"
 
 
 class HistoricSpeedViewSet(GenericSpeedViewSet):
@@ -357,11 +359,44 @@ class HistoricSpeedViewSet(GenericSpeedViewSet):
             timestamp="timestamp",
         )
         response = StreamingHttpResponse(
-            self.csv_generator_local_tz(queryset, fieldnames_dict),
+            self.csv_generator_historic_local_tz(queryset, fieldnames_dict),
             content_type="text/csv",
         )
-        response["Content-Disposition"] = 'attachment; filename="historic_speeds_local.csv"'
+        response["Content-Disposition"] = (
+            'attachment; filename="historic_speeds_local.csv"'
+        )
         return response
+
+    @staticmethod
+    def csv_generator_historic_local_tz(queryset, fieldnames_dict):
+        """Generate CSV with timestamps, temporal_segment and day_type converted to America/Santiago timezone."""
+        santiago_tz = ZoneInfo("America/Santiago")
+        yield ",".join(list(fieldnames_dict.values())) + "\n"
+        for obj in queryset:
+            fieldnames = list(fieldnames_dict.keys())
+            row = []
+            # Convert timestamp once and cache local datetime for reuse
+            local_dt = None
+            if obj.get("timestamp") is not None:
+                local_dt = obj["timestamp"].astimezone(santiago_tz)
+
+            for field in fieldnames:
+                value = obj[field]
+                if local_dt is not None:
+                    if field == "timestamp":
+                        value = local_dt.strftime("%Y-%m-%dT%H:%M:%S")
+                    elif field == "temporal_segment":
+                        # Recalculate: (hour * 60 + minute) // 15
+                        value = (local_dt.hour * 60 + local_dt.minute) // 15
+                    elif field == "day_type":
+                        # Recalculate: L (Mon-Fri), S (Sat), D (Sun)
+                        weekday = local_dt.weekday()
+                        value = "L" if weekday < 5 else ("S" if weekday == 5 else "D")
+                # Join list fields with semicolon to avoid CSV delimiter conflicts
+                if isinstance(value, list):
+                    value = ";".join(str(v) for v in value) if value else ""
+                row.append(str(value))
+            yield ",".join(row) + "\n"
 
 
 class AlertViewSet(viewsets.ModelViewSet):
@@ -496,15 +531,13 @@ class ProcessAxisView(generics.GenericAPIView):
 
     def post(self, request, *args, **kwargs):
         serializer = self.get_serializer(data=request.data)
-        
+
         if not serializer.is_valid():
-            return JsonResponse(
-                {"error": serializer.errors}, status=400
-            )
-        
+            return JsonResponse({"error": serializer.errors}, status=400)
+
         axis_name = serializer.validated_data["axis_name"]
         distance_threshold = serializer.validated_data.get("distance_threshold", 500.0)
-        
+
         try:
             call_command(
                 "add_single_axis",

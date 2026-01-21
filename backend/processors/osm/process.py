@@ -934,6 +934,14 @@ def process_shape_data(
     """
     print("=" * 50)
     print(f"\nProcessing axis: {axis_name} with {len(axis['features'])} features...")
+
+    # Validate that we have features to process
+    if not axis.get("features") or len(axis["features"]) == 0:
+        raise ValueError(
+            f"No features found for axis '{axis_name}'. "
+            "Please verify that the streets configuration is correct and matches existing OSM data."
+        )
+
     # Extract features with valid geometry
     query_data = gpd.GeoDataFrame.from_features(axis, crs="EPSG:4326")
     # STEP 1: Calculate original bearings
@@ -1004,6 +1012,14 @@ def process_shape_data(
 
         # STEP 4: Verify final orientation and correct if necessary
         final_bearing = calculate_bearing(filtered_gdf.geometry.iloc[0])
+
+        # Handle case where bearing calculation returns None
+        if final_bearing is None:
+            print(
+                f"Warning: Could not calculate final bearing for group {i}, using target bearing"
+            )
+            final_bearing = target_bearing
+
         bearing_diff = min(
             abs(final_bearing - target_bearing),
             360 - abs(final_bearing - target_bearing),
