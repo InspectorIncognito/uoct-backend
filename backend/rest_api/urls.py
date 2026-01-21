@@ -1,6 +1,4 @@
 from django.urls import path
-from rest_framework.routers import DefaultRouter
-
 from rest_api.views import (
     AlertViewSet,
     AxlesViewSet,
@@ -18,6 +16,7 @@ from rest_api.views import (
     TestView,
     TrafficSignalViewSet,
 )
+from rest_framework.routers import DefaultRouter
 
 # Wire up our API using automatic URL routing.
 # Additionally, we include login URLs for the browsable API.
@@ -30,6 +29,11 @@ urlpatterns = [
     path("speeds/", SpeedViewSet.as_view({"get": "list"}), name="speeds"),
     path(
         "speeds/to_csv/", SpeedViewSet.as_view({"get": "to_csv"}), name="shape-to_csv"
+    ),
+    path(
+        "speeds/to_csv_local/",
+        SpeedViewSet.as_view({"get": "to_csv_local"}),
+        name="shape-to_csv-local",
     ),
     path("alerts/", AlertViewSet.as_view({"get": "list"}), name="alerts"),
     path(

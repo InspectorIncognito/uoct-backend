@@ -1,5 +1,6 @@
 import json
 from datetime import datetime
+from zoneinfo import ZoneInfo
 
 from django.db.models import ExpressionWrapper, F, FloatField
 from django.db.models.functions import Round
@@ -9,12 +10,6 @@ from geojson import Feature, FeatureCollection, Point
 from gtfs_rt.processors.speed import calculate_speed
 from gtfs_rt.utils import get_last_temporal_range, get_previous_month
 from processors.models.shapes import shapes_to_geojson
-from rest_framework import generics, mixins, viewsets
-from rest_framework.filters import OrderingFilter
-from rest_framework.permissions import AllowAny
-from velocity.grid import GridManager
-from velocity.gtfs import GTFSManager
-
 from rest_api.models import (
     Alert,
     AlertThreshold,
@@ -43,6 +38,11 @@ from rest_api.serializers import (
     StopSerializer,
     TrafficSignalSerializer,
 )
+from rest_framework import generics, mixins, viewsets
+from rest_framework.filters import OrderingFilter
+from rest_framework.permissions import AllowAny
+from velocity.grid import GridManager
+from velocity.gtfs import GTFSManager
 
 
 class TestView(generics.GenericAPIView):
@@ -234,6 +234,76 @@ class SpeedViewSet(GenericSpeedViewSet):
         response["Content-Disposition"] = 'attachment; filename="segment_speeds.csv"'
 
         return response
+
+    def to_csv_local(self, request, *args, **kwargs):
+        """Export CSV with timestamps converted to America/Santiago timezone."""
+        query_params = request.query_params
+        queryset = self.get_queryset().values(
+            "segment__shape",
+            "segment__sequence",
+            "temporal_segment",
+            "day_type",
+            "distance",
+            "time_secs",
+            "timestamp",
+            "services",
+        )
+        if len(query_params) == 0:
+            start_time, end_time = get_last_temporal_range()
+            queryset = queryset.filter(
+                timestamp__gte=start_time,
+                timestamp__lte=end_time,
+            )
+        fieldnames_dict = dict(
+            segment__shape="shape",
+            segment__sequence="sequence",
+            temporal_segment="temporal_segment",
+            day_type="day_type",
+            distance="distance",
+            time_secs="time_secs",
+            timestamp="timestamp",
+            services="active_services",
+        )
+        response = StreamingHttpResponse(
+            self.csv_generator_local_tz(queryset, fieldnames_dict),
+            content_type="text/csv",
+        )
+        response["Content-Disposition"] = (
+            'attachment; filename="segment_speeds_local.csv"'
+        )
+
+        return response
+
+    @staticmethod
+    def csv_generator_local_tz(queryset, fieldnames_dict):
+        """Generate CSV with timestamps, temporal_segment and day_type converted to America/Santiago timezone."""
+        santiago_tz = ZoneInfo("America/Santiago")
+        yield ",".join(list(fieldnames_dict.values())) + "\n"
+        for obj in queryset:
+            fieldnames = list(fieldnames_dict.keys())
+            row = []
+            # Convert timestamp once and cache local datetime for reuse
+            local_dt = None
+            if obj.get("timestamp") is not None:
+                local_dt = obj["timestamp"].astimezone(santiago_tz)
+
+            for field in fieldnames:
+                value = obj[field]
+                if local_dt is not None:
+                    if field == "timestamp":
+                        value = local_dt.strftime("%Y-%m-%dT%H:%M:%S")
+                    elif field == "temporal_segment":
+                        # Recalculate: (hour * 60 + minute) // 15
+                        value = (local_dt.hour * 60 + local_dt.minute) // 15
+                    elif field == "day_type":
+                        # Recalculate: L (Mon-Fri), S (Sat), D (Sun)
+                        weekday = local_dt.weekday()
+                        value = "L" if weekday < 5 else ("S" if weekday == 5 else "D")
+                # Join list fields with semicolon to avoid CSV delimiter conflicts
+                if isinstance(value, list):
+                    value = ";".join(str(v) for v in value) if value else ""
+                row.append(str(value))
+            yield ",".join(row) + "\n"
 
 
 class HistoricSpeedViewSet(GenericSpeedViewSet):
