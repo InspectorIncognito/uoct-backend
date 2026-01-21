@@ -1,4 +1,6 @@
 from django.urls import path
+from rest_framework.routers import DefaultRouter
+
 from rest_api.views import (
     AlertViewSet,
     AxlesViewSet,
@@ -8,6 +10,7 @@ from rest_api.views import (
     GTFSShapeViewSet,
     GTFSStopsViewSet,
     HistoricSpeedViewSet,
+    ProcessAxisView,
     SegmentViewSet,
     ServicesViewSet,
     ShapeViewSet,
@@ -16,7 +19,6 @@ from rest_api.views import (
     TestView,
     TrafficSignalViewSet,
 )
-from rest_framework.routers import DefaultRouter
 
 # Wire up our API using automatic URL routing.
 # Additionally, we include login URLs for the browsable API.
@@ -49,6 +51,11 @@ urlpatterns = [
         HistoricSpeedViewSet.as_view({"get": "to_csv"}),
         name="historicSpeeds-to_csv",
     ),
+    path(
+        "historicSpeeds/to_csv_local/",
+        HistoricSpeedViewSet.as_view({"get": "to_csv_local"}),
+        name="historicSpeeds-to_csv-local",
+    ),
     path("stops/", StopViewSet.as_view({"get": "list"}), name="stops"),
     path("stops/geojson/", StopViewSet.as_view({"get": "to_geojson"}), name="stops"),
     path("gtfs_stops/", GTFSStopsViewSet.as_view(), name="stopsGeoJson"),
@@ -71,4 +78,5 @@ urlpatterns = [
         name="traffic_signal",
     ),
     path("camera/", CameraViewSet.as_view({"get": "list"}), name="camera"),
+    path("axles/process/", ProcessAxisView.as_view(), name="process-axis"),
 ] + router.urls

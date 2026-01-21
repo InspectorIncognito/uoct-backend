@@ -124,3 +124,8 @@ class CameraSerializer(serializers.ModelSerializer):
     class Meta:
         model = Camera
         fields = "__all__"
+
+
+class ProcessAxisSerializer(serializers.Serializer):
+    axis_name = serializers.CharField(max_length=255, required=True)
+    distance_threshold = serializers.FloatField(required=False, default=500.0)

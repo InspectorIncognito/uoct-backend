@@ -2,6 +2,7 @@ import json
 from datetime import datetime
 from zoneinfo import ZoneInfo
 
+from django.core.management import call_command
 from django.db.models import ExpressionWrapper, F, FloatField
 from django.db.models.functions import Round
 from django.http import JsonResponse, StreamingHttpResponse
@@ -10,6 +11,12 @@ from geojson import Feature, FeatureCollection, Point
 from gtfs_rt.processors.speed import calculate_speed
 from gtfs_rt.utils import get_last_temporal_range, get_previous_month
 from processors.models.shapes import shapes_to_geojson
+from rest_framework import generics, mixins, viewsets
+from rest_framework.filters import OrderingFilter
+from rest_framework.permissions import AllowAny
+from velocity.grid import GridManager
+from velocity.gtfs import GTFSManager
+
 from rest_api.models import (
     Alert,
     AlertThreshold,
@@ -31,6 +38,7 @@ from rest_api.serializers import (
     CameraSerializer,
     GTFSShapeSerializer,
     HistoricSpeedSerializer,
+    ProcessAxisSerializer,
     SegmentSerializer,
     ServicesSerializer,
     ShapeSerializer,
@@ -38,11 +46,6 @@ from rest_api.serializers import (
     StopSerializer,
     TrafficSignalSerializer,
 )
-from rest_framework import generics, mixins, viewsets
-from rest_framework.filters import OrderingFilter
-from rest_framework.permissions import AllowAny
-from velocity.grid import GridManager
-from velocity.gtfs import GTFSManager
 
 
 class TestView(generics.GenericAPIView):
@@ -183,6 +186,37 @@ class GenericSpeedViewSet(viewsets.ModelViewSet, mixins.ListModelMixin):
                 row.append(str(value))
             yield ",".join(row) + "\n"
 
+    @staticmethod
+    def csv_generator_local_tz(queryset, fieldnames_dict):
+        """Generate CSV with timestamps, temporal_segment and day_type converted to America/Santiago timezone."""
+        santiago_tz = ZoneInfo("America/Santiago")
+        yield ",".join(list(fieldnames_dict.values())) + "\n"
+        for obj in queryset:
+            fieldnames = list(fieldnames_dict.keys())
+            row = []
+            # Convert timestamp once and cache local datetime for reuse
+            local_dt = None
+            if obj.get("timestamp") is not None:
+                local_dt = obj["timestamp"].astimezone(santiago_tz)
+
+            for field in fieldnames:
+                value = obj[field]
+                if local_dt is not None:
+                    if field == "timestamp":
+                        value = local_dt.strftime("%Y-%m-%dT%H:%M:%S")
+                    elif field == "temporal_segment":
+                        # Recalculate: (hour * 60 + minute) // 15
+                        value = (local_dt.hour * 60 + local_dt.minute) // 15
+                    elif field == "day_type":
+                        # Recalculate: L (Mon-Fri), S (Sat), D (Sun)
+                        weekday = local_dt.weekday()
+                        value = "L" if weekday < 5 else ("S" if weekday == 5 else "D")
+                # Join list fields with semicolon to avoid CSV delimiter conflicts
+                if isinstance(value, list):
+                    value = ";".join(str(v) for v in value) if value else ""
+                row.append(str(value))
+            yield ",".join(row) + "\n"
+
 
 class SpeedViewSet(GenericSpeedViewSet):
     serializer_class = SpeedSerializer
@@ -268,42 +302,9 @@ class SpeedViewSet(GenericSpeedViewSet):
             self.csv_generator_local_tz(queryset, fieldnames_dict),
             content_type="text/csv",
         )
-        response["Content-Disposition"] = (
-            'attachment; filename="segment_speeds_local.csv"'
-        )
+        response["Content-Disposition"] = 'attachment; filename="segment_speeds_local.csv"'
 
         return response
-
-    @staticmethod
-    def csv_generator_local_tz(queryset, fieldnames_dict):
-        """Generate CSV with timestamps, temporal_segment and day_type converted to America/Santiago timezone."""
-        santiago_tz = ZoneInfo("America/Santiago")
-        yield ",".join(list(fieldnames_dict.values())) + "\n"
-        for obj in queryset:
-            fieldnames = list(fieldnames_dict.keys())
-            row = []
-            # Convert timestamp once and cache local datetime for reuse
-            local_dt = None
-            if obj.get("timestamp") is not None:
-                local_dt = obj["timestamp"].astimezone(santiago_tz)
-
-            for field in fieldnames:
-                value = obj[field]
-                if local_dt is not None:
-                    if field == "timestamp":
-                        value = local_dt.strftime("%Y-%m-%dT%H:%M:%S")
-                    elif field == "temporal_segment":
-                        # Recalculate: (hour * 60 + minute) // 15
-                        value = (local_dt.hour * 60 + local_dt.minute) // 15
-                    elif field == "day_type":
-                        # Recalculate: L (Mon-Fri), S (Sat), D (Sun)
-                        weekday = local_dt.weekday()
-                        value = "L" if weekday < 5 else ("S" if weekday == 5 else "D")
-                # Join list fields with semicolon to avoid CSV delimiter conflicts
-                if isinstance(value, list):
-                    value = ";".join(str(v) for v in value) if value else ""
-                row.append(str(value))
-            yield ",".join(row) + "\n"
 
 
 class HistoricSpeedViewSet(GenericSpeedViewSet):
@@ -332,6 +333,34 @@ class HistoricSpeedViewSet(GenericSpeedViewSet):
             self.csv_generator(queryset, fieldnames_dict), content_type="text/csv"
         )
         response["Content-Disposition"] = 'attachment; filename="segment_speeds.csv"'
+        return response
+
+    def to_csv_local(self, request, *args, **kwargs):
+        """Export CSV with timestamps converted to America/Santiago timezone."""
+        queryset = self.get_queryset().values(
+            "segment__shape",
+            "segment__sequence",
+            "temporal_segment",
+            "day_type",
+            "speed",
+            "timestamp",
+        )
+        if len(request.query_params) == 0:
+            previous_month = get_previous_month()
+            queryset = queryset.filter(timestamp__month=previous_month)
+        fieldnames_dict = dict(
+            segment__shape="shape",
+            segment__sequence="sequence",
+            temporal_segment="temporal_segment",
+            day_type="day_type",
+            speed="speed",
+            timestamp="timestamp",
+        )
+        response = StreamingHttpResponse(
+            self.csv_generator_local_tz(queryset, fieldnames_dict),
+            content_type="text/csv",
+        )
+        response["Content-Disposition"] = 'attachment; filename="historic_speeds_local.csv"'
         return response
 
 
@@ -459,3 +488,38 @@ class CameraViewSet(viewsets.ModelViewSet):
     pagination_class = None
     serializer_class = CameraSerializer
     queryset = Camera.objects.all()
+
+
+class ProcessAxisView(generics.GenericAPIView):
+    permission_classes = [AllowAny]
+    serializer_class = ProcessAxisSerializer
+
+    def post(self, request, *args, **kwargs):
+        serializer = self.get_serializer(data=request.data)
+        
+        if not serializer.is_valid():
+            return JsonResponse(
+                {"error": serializer.errors}, status=400
+            )
+        
+        axis_name = serializer.validated_data["axis_name"]
+        distance_threshold = serializer.validated_data.get("distance_threshold", 500.0)
+        
+        try:
+            call_command(
+                "add_single_axis",
+                axis_name,
+                distance_threshold=distance_threshold,
+            )
+            return JsonResponse(
+                {
+                    "status": "success",
+                    "message": f'Axis "{axis_name}" processed successfully',
+                },
+                status=200,
+            )
+        except Exception as e:
+            return JsonResponse(
+                {"error": str(e)},
+                status=400,
+            )
