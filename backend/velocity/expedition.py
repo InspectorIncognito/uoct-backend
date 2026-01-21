@@ -6,7 +6,6 @@ from typing import TYPE_CHECKING
 from zoneinfo import ZoneInfo
 
 from django.utils.timezone import get_current_timezone
-from geopandas import GeoDataFrame
 from velocity.gps import GPSPulse as GPS
 from velocity.segment import (
     PartialSpatialSegment,
@@ -23,6 +22,8 @@ if TYPE_CHECKING:
 # TODO: Add vehicle license plate if necessary
 class ExpeditionData:
     MAXIMUM_ACCEPTABLE_TIME_BETWEEN_GPS_PULSES = 60 * 10  # in seconds
+    MAXIMUM_STATIONARY_TIME = 60 * 5  # 5 minutos (300 segundos)
+    MINIMUM_MOVEMENT_THRESHOLD = 5  # metros mínimos para considerar movimiento
 
     def __init__(
         self,
@@ -46,6 +47,7 @@ class ExpeditionData:
 
         self.ignored_gps_pulses = 0
         self.ignored_segments_because_time_between_gps_pulses = 0
+        self.ignored_segments_because_stationary = 0
 
     def add_gps_point(self, gps_pulse: GPS):
         if len(self.gps_points) == 0:
@@ -58,6 +60,68 @@ class ExpeditionData:
         elif gps_pulse.timestamp < self.gps_points[-1].timestamp:
             # print(f'gps point {gps_pulse} is older than latest gps point {gps_pulse}.')
             self.ignored_gps_pulses += 1
+
+    def _get_stationary_indices(self) -> set[int]:
+        """
+        Identifica índices de pulsos GPS que corresponden a períodos
+        donde el vehículo estuvo quieto por más de MAXIMUM_STATIONARY_TIME.
+
+        Solo descarta los pulsos GPS a partir del momento en que se cumplen
+        los 5 minutos estacionario, no retroactivamente.
+
+        Returns:
+            Set de índices a excluir del cálculo de velocidad
+        """
+        n_points = len(self.gps_points)
+        if n_points < 2:
+            return set()
+
+        distances = self.gps_distance_on_route
+        points = self.gps_points
+        threshold = self.MINIMUM_MOVEMENT_THRESHOLD
+        max_stationary = self.MAXIMUM_STATIONARY_TIME
+
+        indices_to_exclude = set()
+        stationary_start_idx = None
+        stationary_start_time = None
+        threshold_exceeded = False  # Flag para saber si ya se superó el umbral
+
+        for i in range(1, n_points):
+            prev_dist = distances[i - 1]
+            curr_dist = distances[i]
+
+            # Saltar puntos sin proyección válida
+            if prev_dist is None or curr_dist is None:
+                # Reiniciar período estacionario si hay gaps
+                stationary_start_idx = None
+                threshold_exceeded = False
+                continue
+
+            delta_distance = abs(curr_dist - prev_dist)
+
+            if delta_distance < threshold:
+                # Inicio o continuación de período estacionario
+                if stationary_start_idx is None:
+                    stationary_start_idx = i - 1
+                    stationary_start_time = points[i - 1].timestamp
+                    threshold_exceeded = False
+
+                # Verificar duración acumulada
+                elapsed = (points[i].timestamp - stationary_start_time).total_seconds()
+
+                if elapsed >= max_stationary:
+                    if not threshold_exceeded:
+                        # Primera vez que se supera el umbral - marcar este índice
+                        threshold_exceeded = True
+                    # Solo agregar índices a partir de que se superó el umbral
+                    indices_to_exclude.add(i)
+            else:
+                # Movimiento detectado - reiniciar tracking
+                stationary_start_idx = None
+                stationary_start_time = None
+                threshold_exceeded = False
+
+        return indices_to_exclude
 
     def calculate_speed(
         self,
@@ -82,7 +146,17 @@ class ExpeditionData:
         # Contador de puntos descartados por falta de proyección HMM
         skipped_no_projection = 0
 
+        # Obtener índices de períodos estacionarios (O(n) pre-cálculo)
+        stationary_indices = self._get_stationary_indices()
+
         for index, gps_pulse in enumerate(self.gps_points[1:], start=1):
+            # Saltar pulsos en períodos estacionarios >= 5 min (O(1) lookup)
+            if index in stationary_indices:
+                self.ignored_segments_because_stationary += 1
+                print(
+                    f"{self}: Skipping stationary pulse at index {index} (>= 5 min stopped)."
+                )
+                continue
             previous_gps_pulse = self.gps_points[index - 1]
             previous_distance = self.gps_distance_on_route[index - 1]
             current_distance = self.gps_distance_on_route[index]
@@ -122,10 +196,6 @@ class ExpeditionData:
                 else:
                     current_spatial_segment_obj = segment_criteria.get_spatial_segment(
                         self.shape_id, current_distance
-                    )
-                    print(
-                        f"{self}: Skipping non-monotonic distance segment: {self.shape_id}: {current_spatial_segment_obj}"
-                        f"(prev={previous_distance:.1f}m, curr={current_distance:.1f}m, delta={delta_distance:.1f}m)"
                     )
                     skipped_no_projection += 1
                     continue
@@ -285,4 +355,7 @@ class ExpeditionData:
     def __str__(self):
         route = self.route_id if self.route_id else "Unknown"
         shape = self.shape_id if self.shape_id else "NoShape"
+        return f"Expedition ({route},{self.license_plate},{shape})"
+        return f"Expedition ({route},{self.license_plate},{shape})"
+        return f"Expedition ({route},{self.license_plate},{shape})"
         return f"Expedition ({route},{self.license_plate},{shape})"
