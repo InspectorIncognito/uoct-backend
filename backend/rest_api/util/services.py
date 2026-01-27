@@ -1,18 +1,16 @@
-import json
 import time
 from typing import Dict, List, Optional, Tuple
 
 import geopandas as gpd
-import numpy as np
 import pandas as pd
-from rest_api.models import Segment, Services, Shape
-from rest_api.util.gtfs import GTFSShapeManager
-from rest_api.util.hmm.services_hmm import build_matched_features, match_shapes_to_axes
-from rest_api.util.shape import ShapeManager
 from shapely.geometry import LineString as shp_LineString
 from shapely.geometry import MultiLineString as shp_MultiLineString
 from shapely.geometry import Point as shp_Point
-from shapely.ops import nearest_points
+
+from rest_api.models import Segment, Services, Shape
+from rest_api.util.gtfs import GTFSShapeManager
+from rest_api.util.hmm.services_hmm import match_shapes_to_axes
+from rest_api.util.shape import ShapeManager
 
 
 def flush_services_from_db():
@@ -186,16 +184,33 @@ def assign_routes_to_segments(
     beta: float = 40,
     bearing_weight_factor: float = 0.5,
     sigma_bearing: float = 40,
+    shape_name: Optional[str] = None,
 ):
     """
     Asigna TODAS las rutas (GTFS) que pasan cerca de cada segmento y las guarda en DB.
     - Usa HMM para emparejar trayectorias (rutas GTFS) a ejes (segmentos por axis).
     - Agrega por segmento todas las route_id observadas.
     - Persiste usando create_services(segment, services).
+
+    Parameters
+    ----------
+    shape_name : Optional[str]
+        Si se proporciona, solo procesa los segmentos de este eje (ej: "Eje Alameda").
+        Si es None, procesa todos los ejes.
     """
     # Limpia servicios previos para evitar duplicados/inconsistencias
-    print("Starting assign_routes_to_segments")
-    flush_services_from_db()
+    print(
+        "Starting assign_routes_to_segments"
+        + (f" for shape: {shape_name}" if shape_name else "")
+    )
+    if shape_name is None:
+        flush_services_from_db()
+    else:
+        # Solo eliminar servicios del eje específico
+        shapes = Shape.objects.filter(name__startswith=f"{shape_name}_")
+        for shape in shapes:
+            Services.objects.filter(segment__shape=shape).delete()
+        print(f"Flushed services for shape: {shape_name}")
 
     gtfs_shape_manager = GTFSShapeManager()
     shape_manager = ShapeManager()
@@ -215,6 +230,12 @@ def assign_routes_to_segments(
 
     # 3) Construir GDF de segmentos por axis (concatenando direcciones del mismo eje)
     axis_segments = shape_manager.get_segments_gdf()
+
+    # Filtrar por shape_name si se proporciona
+    if shape_name is not None:
+        axis_segments = {k: v for k, v in axis_segments.items() if k == shape_name}
+        print(f"Filtered to specific axis: {shape_name}")
+
     print(f"Prepared {len(axis_segments)} axes for matching")
     total_segments = sum(len(gdf) for gdf in axis_segments.values() if gdf is not None)
     print(f"Total segments available across axes: {total_segments}")

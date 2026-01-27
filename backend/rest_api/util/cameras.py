@@ -2,7 +2,8 @@ from pathlib import Path
 
 import geopandas as gpd
 import pandas as pd
-from rest_api.models import Camera, Segment
+
+from rest_api.models import Camera, Segment, Shape
 from rest_api.util.segment import SegmentManager
 
 
@@ -10,12 +11,25 @@ def flush_cameras_from_db():
     Camera.objects.all().delete()
 
 
-def assign_cameras_to_segments():
+def assign_cameras_to_segments(shape_name=None):
     """
     Assigns cameras to all segments within a 10-meter radius.
     Reads camera data from processed_cameras.csv and creates Camera objects
     for each camera-segment pair within the radius.
+
+    Parameters
+    ----------
+    shape_name : str, optional
+        If provided, only process segments for this specific shape (e.g., "Eje Alameda").
+        If None, process all segments.
     """
+
+    # Clear cameras for specific shape if provided
+    if shape_name is not None:
+        shapes = Shape.objects.filter(name__startswith=f"{shape_name}_")
+        for shape in shapes:
+            Camera.objects.filter(segment__shape=shape).delete()
+        print(f"Flushed cameras for shape: {shape_name}")
     # Load cameras from CSV
     fixtures_path = Path(__file__).parent.parent.parent / "fixtures"
     cameras_csv_path = fixtures_path / "processed_cameras.csv"
@@ -37,8 +51,11 @@ def assign_cameras_to_segments():
 
     # Get segments as GeoDataFrame
     segment_manager = SegmentManager()
-    segments = segment_manager.segments_to_gdf()
+    segments = segment_manager.segments_to_gdf(shape_name=shape_name)
     segments_gdf = gpd.GeoDataFrame.from_features(segments, crs="epsg:4326")
+
+    if shape_name:
+        print(f"Processing cameras for shape: {shape_name}")
 
     # Validate and clean geometries
     cameras_gdf = cameras_gdf[

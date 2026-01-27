@@ -50,6 +50,41 @@ class Command(BaseCommand):
             self.stdout.write(
                 self.style.SUCCESS(f"Successfully added axis: {axis_name}")
             )
+
+            # Execute map matching for the new axis
+            self.stdout.write("\n" + "=" * 50)
+            self.stdout.write("Starting map matching for new axis...")
+            self.stdout.write("=" * 50 + "\n")
+
+            # Assign routes to segments
+            self.stdout.write("Assigning routes to segments...")
+            from rest_api.util.services import assign_routes_to_segments
+
+            assign_routes_to_segments(shape_name=axis_name)
+            self.stdout.write(self.style.SUCCESS("Routes assigned successfully"))
+
+            # Assign stops to segments
+            self.stdout.write("Assigning stops to segments...")
+            from rest_api.util.stops import assign_stops_to_segments
+
+            assign_stops_to_segments(shape_name=axis_name)
+            self.stdout.write(self.style.SUCCESS("Stops assigned successfully"))
+
+            # Assign cameras to segments
+            self.stdout.write("Assigning cameras to segments...")
+            from rest_api.util.cameras import assign_cameras_to_segments
+
+            assign_cameras_to_segments(shape_name=axis_name)
+            self.stdout.write(self.style.SUCCESS("Cameras assigned successfully"))
+
+            self.stdout.write("\n" + "=" * 50)
+            self.stdout.write(
+                self.style.SUCCESS(
+                    f"Axis '{axis_name}' fully processed with all map matching complete!"
+                )
+            )
+            self.stdout.write("=" * 50 + "\n")
+
         except Exception as e:
             self.stdout.write(
                 self.style.ERROR(f"Error adding axis '{axis_name}': {str(e)}")

@@ -6,12 +6,27 @@ from rest_api.models import Segment, Stop
 
 
 class SegmentManager:
-    def __init__(self):
-        self.segments = Segment.objects.all()
+    def __init__(self, shape_name=None):
+        if shape_name:
+            from rest_api.models import Shape
 
-    def segments_to_gdf(self):
+            shapes = Shape.objects.filter(name__startswith=f"{shape_name}_")
+            self.segments = Segment.objects.filter(shape__in=shapes)
+        else:
+            self.segments = Segment.objects.all()
+
+    def segments_to_gdf(self, shape_name=None):
+        # Si se proporciona shape_name aquí, filtrar adicionalmente
+        if shape_name:
+            from rest_api.models import Shape
+
+            shapes = Shape.objects.filter(name__startswith=f"{shape_name}_")
+            segments_to_use = Segment.objects.filter(shape__in=shapes)
+        else:
+            segments_to_use = self.segments
+
         segments = []
-        for segment in self.segments:
+        for segment in segments_to_use:
             segments.append(
                 Feature(
                     geometry=LineString(coordinates=segment.geometry),
@@ -117,6 +132,6 @@ class SegmentManager:
                 continue
 
         print(f"Paradas creadas: {stops_created}, Paradas omitidas: {stops_skipped}")
-    
+
     def assign_traffic_signals_to_segments(self):
         pass

@@ -251,9 +251,12 @@ class GTFSManager:
             )
 
     # Stops
-    def assign_stops_to_segments(self):
+    def assign_stops_to_segments(self, shape_name=None):
         stops_df = self.stops_reader.load_csv_file_as_df()
         stops_df = stops_df.drop(columns=["stop_code", "location_type"])
 
         stops_df = stops_df[["stop_id", "stop_lat", "stop_lon"]]
-        self.segment_manager.assign_stops_for_each_segment(stops_df)
+
+        # Crear SegmentManager con filtro de shape si se proporciona
+        segment_manager = SegmentManager(shape_name=shape_name)
+        segment_manager.assign_stops_for_each_segment(stops_df)
