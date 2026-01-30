@@ -511,6 +511,117 @@ class AxlesViewSet(viewsets.ModelViewSet):
     serializer_class = AxlesSerializer
     permission_classes = [AllowAny]
 
+    def destroy(self, request, *args, **kwargs):
+        """
+        Override destroy to also delete associated shapes, segments, speeds, etc.
+        This ensures that deleting an Axle also cleans up all related data.
+        """
+        instance = self.get_object()
+        axis_name = instance.name
+
+        # Delete all related shapes and their data
+        deleted_info = self._delete_axis_shapes(axis_name)
+
+        # Delete the Axle itself
+        self.perform_destroy(instance)
+
+        return JsonResponse(
+            {
+                "status": "success",
+                "message": f"Eje '{axis_name}' eliminado exitosamente",
+                "deleted": deleted_info,
+            }
+        )
+
+    def _delete_axis_shapes(self, axis_name: str) -> dict:
+        """
+        Delete all shapes associated with an axis name, including:
+        - Speed records
+        - HistoricSpeed records
+        - Alert records
+        - Services records
+        - Stop records
+        - Camera records
+        - TrafficSignal records
+        - Segments
+        - Shapes
+        """
+        from rest_api.models import (
+            Alert,
+            Camera,
+            HistoricSpeed,
+            Segment,
+            Services,
+            Shape,
+            Speed,
+            Stop,
+            TrafficSignal,
+        )
+
+        # Find all shapes for this axis (e.g., "Eje Alameda_0", "Eje Alameda_1")
+        shapes = Shape.objects.filter(name__startswith=f"{axis_name}_")
+        shape_ids = list(shapes.values_list("id", flat=True))
+
+        if not shape_ids:
+            return {
+                "shapes": 0,
+                "segments": 0,
+                "speeds": 0,
+                "historic_speeds": 0,
+                "alerts": 0,
+                "services": 0,
+                "stops": 0,
+                "cameras": 0,
+                "traffic_signals": 0,
+            }
+
+        # Get all segments for these shapes
+        segments = Segment.objects.filter(shape_id__in=shape_ids)
+
+        # Delete in order (due to foreign key constraints)
+        # 1. Delete Speed records
+        speeds_deleted, _ = Speed.objects.filter(segment__in=segments).delete()
+
+        # 2. Delete HistoricSpeed records
+        historic_deleted, _ = HistoricSpeed.objects.filter(
+            segment__in=segments
+        ).delete()
+
+        # 3. Delete Alert records
+        alerts_deleted, _ = Alert.objects.filter(segment__in=segments).delete()
+
+        # 4. Delete Services records
+        services_deleted, _ = Services.objects.filter(segment__in=segments).delete()
+
+        # 5. Delete Stop records
+        stops_deleted, _ = Stop.objects.filter(segment__in=segments).delete()
+
+        # 6. Delete Camera records (note: field is segment_id, not segment)
+        cameras_deleted, _ = Camera.objects.filter(segment_id__in=segments).delete()
+
+        # 7. Delete TrafficSignal records (note: field is segment_id, not segment)
+        signals_deleted, _ = TrafficSignal.objects.filter(
+            segment_id__in=segments
+        ).delete()
+
+        # 8. Delete Segments
+        segments_deleted, _ = segments.delete()
+
+        # 9. Delete Shapes
+        shapes_deleted, _ = shapes.delete()
+
+        return {
+            "shapes": shapes_deleted,
+            "segments": segments_deleted,
+            "speeds": speeds_deleted,
+            "historic_speeds": historic_deleted,
+            "alerts": alerts_deleted,
+            "services": services_deleted,
+            "stops": stops_deleted,
+            "cameras": cameras_deleted,
+            "traffic_signals": signals_deleted,
+        }
+
 
 class TrafficSignalViewSet(viewsets.ModelViewSet):
     permission_classes = [AllowAny]

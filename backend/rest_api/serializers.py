@@ -87,15 +87,33 @@ class AlertThresholdSerializer(serializers.ModelSerializer):
 
 
 class AxlesSerializer(serializers.ModelSerializer):
+    has_shapes = serializers.SerializerMethodField()
+    shapes_count = serializers.SerializerMethodField()
+
     class Meta:
         model = Axles
-        fields = ["id", "name", "streets", "city"]
+        fields = ["id", "name", "streets", "city", "has_shapes", "shapes_count"]
+
+    def get_has_shapes(self, obj):
+        """Check if this axis has processed shapes in the database."""
+        from rest_api.models import Shape
+
+        return Shape.objects.filter(name__startswith=f"{obj.name}_").exists()
+
+    def get_shapes_count(self, obj):
+        """Count how many shapes this axis has (usually 2, one per direction)."""
+        from rest_api.models import Shape
+
+        return Shape.objects.filter(name__startswith=f"{obj.name}_").count()
 
     def validate_name(self, value):
         if not value or not value.strip():
             raise serializers.ValidationError("El nombre no puede estar vacío.")
         # verificar que no exista otro con el mismo nombre (ignorando mayúsculas/minúsculas)
+        # Excluir el objeto actual si estamos actualizando
         qs = Axles.objects.filter(name__iexact=value.strip())
+        if self.instance:
+            qs = qs.exclude(pk=self.instance.pk)
         if qs.exists():
             raise serializers.ValidationError("Ya existe un eje con ese nombre.")
         return value.strip()

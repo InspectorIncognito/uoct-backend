@@ -28,7 +28,7 @@ def assign_cameras_to_segments(shape_name=None):
     if shape_name is not None:
         shapes = Shape.objects.filter(name__startswith=f"{shape_name}_")
         for shape in shapes:
-            Camera.objects.filter(segment__shape=shape).delete()
+            Camera.objects.filter(segment_id__shape=shape).delete()
         print(f"Flushed cameras for shape: {shape_name}")
     # Load cameras from CSV
     fixtures_path = Path(__file__).parent.parent.parent / "fixtures"
