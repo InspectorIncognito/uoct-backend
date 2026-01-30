@@ -13,9 +13,7 @@ class VehicleData:
         self.license_plate = license_plate
         self.exp_plate_route_ids = dict()
 
-    def add_gps_pulse(self, gps_point: GPS, route_id: str, license_plate: str):
-        # TODO: ver si es necesario crear nuevas expediciones si hay gaps de tiempo grandes.
-        # TODO: Ver si se necesita la ruta para diferenciar expediciones ya que luego del MM se puede perder.
+    def add_gps_pulse(self, gps_point: GPS, route_id: str | None, license_plate: str):
         if (license_plate, route_id) not in self.exp_plate_route_ids:
             new_exp = ExpeditionData(
                 self.grid_manager,

@@ -6,6 +6,7 @@ from typing import TYPE_CHECKING
 from zoneinfo import ZoneInfo
 
 from django.utils.timezone import get_current_timezone
+
 from velocity.gps import GPSPulse as GPS
 from velocity.segment import (
     PartialSpatialSegment,
@@ -28,7 +29,7 @@ class ExpeditionData:
     def __init__(
         self,
         grid_manager: GridManager,
-        route_id: str,
+        route_id: str | None,
         timestamp: datetime,
         license_plate: str,
     ):
@@ -63,17 +64,20 @@ class ExpeditionData:
 
     def _get_stationary_indices(self) -> set[int]:
         """
-        Identifica índices de pulsos GPS que corresponden a períodos
-        donde el vehículo estuvo quieto por más de MAXIMUM_STATIONARY_TIME.
+        Identifies indexes of GPS points where the vehicle has been stationary (MINIMUM_MOVEMENT_THRESHOLD)
+        for longer than MAXIMUM_STATIONARY_TIME based on gps_distance_on_route and also dont have a route_id
+        (i.e. route_id=nan).
 
-        Solo descarta los pulsos GPS a partir del momento en que se cumplen
-        los 5 minutos estacionario, no retroactivamente.
-
-        Returns:
-            Set de índices a excluir del cálculo de velocidad
+        Returns
+        -------
+        set[int]
+            A set of indices corresponding to stationary GPS point.
         """
         n_points = len(self.gps_points)
-        if n_points < 2:
+        # Only filter stationary points for expeditions without a route_id
+        # route_id can be None, "nan" (string from pandas category), or a valid route string
+        has_valid_route = self.route_id is not None and self.route_id != "nan"
+        if n_points < 2 or has_valid_route:
             return set()
 
         distances = self.gps_distance_on_route
@@ -150,7 +154,7 @@ class ExpeditionData:
         stationary_indices = self._get_stationary_indices()
 
         for index, gps_pulse in enumerate(self.gps_points[1:], start=1):
-            # Saltar pulsos en períodos estacionarios >= 5 min (O(1) lookup)
+            # Saltar pulsos sin recorrido asignado y en períodos estacionarios >= 5 min
             if index in stationary_indices:
                 self.ignored_segments_because_stationary += 1
                 print(
@@ -355,7 +359,4 @@ class ExpeditionData:
     def __str__(self):
         route = self.route_id if self.route_id else "Unknown"
         shape = self.shape_id if self.shape_id else "NoShape"
-        return f"Expedition ({route},{self.license_plate},{shape})"
-        return f"Expedition ({route},{self.license_plate},{shape})"
-        return f"Expedition ({route},{self.license_plate},{shape})"
         return f"Expedition ({route},{self.license_plate},{shape})"
