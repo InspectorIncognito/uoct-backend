@@ -57,7 +57,7 @@ def register_scheduled_jobs():
         use_local_timezone=False,
     )
     scheduler.cron(
-        "0 0 1 * *",  # at 00:00 every day-of-month 1
+        "0 0 1,15 * *",  # at 00:00 on the 1st and 15th of each month (every two weeks)
         func=flush_gps_pulses,  # Function to be queued
         args=[],  # Arguments passed into function when executed
         queue_name=settings.CRONLIKE_QUEUE,  # In which queue the job should be put in
