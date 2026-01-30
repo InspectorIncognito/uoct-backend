@@ -2,13 +2,15 @@ import datetime
 import time
 
 import pandas as pd
-from gtfs_rt.processors.utils import apply_mad_filter_with_historical
-from gtfs_rt.utils import get_last_temporal_range
 from rest_api.models import Segment, Speed
 from velocity.grid import GridManager
 from velocity.segment import FiveHundredMeterSegmentCriteria
 from velocity.utils import generate_grid
 from velocity.vehicle import VehicleManager
+
+from gtfs_rt.utils import get_last_temporal_range
+
+MAX_SPEED_KMH = 85.0  # Maximum speed threshold in km/h
 
 
 def calculate_speed(
@@ -75,27 +77,14 @@ def calculate_speed(
     # The speed calculation uses local timezone temporal segments
     df = df.rename(columns={"local_temporal_segment_index": "temporal_segment"})
 
-    # Apply MAD-based outlier filtering using historical data
-    # Compares current speeds against historical median/MAD for each segment
-    # Falls back to simple bounds (3-90 km/h) when no historical data exists
-    df, df_outliers = apply_mad_filter_with_historical(
-        df,
-        day_type=today_weekday,
-        speed_col="speed(km/h)",
-        z_incident=3.0,  # Flag speeds >3 MAD from historical median
-        z_outlier=5,  # Remove speeds >5 MAD from historical median
-        fallback_min=3.0,  # Minimum speed when no history (km/h)
-        fallback_max=90.0,  # Maximum speed when no history (km/h)
-        fallback_flag=True,  # For now leave in True, we need more info to apply the mad filter
-    )
+    # Filter out speeds above MAX_SPEED_KMH threshold
+    initial_count = len(df)
+    df = df[df["speed(km/h)"] <= MAX_SPEED_KMH]
+    filtered_count = initial_count - len(df)
+    if filtered_count > 0:
+        print(f"Filtered {filtered_count} records with speed > {MAX_SPEED_KMH} km/h")
 
-    # Note: df now contains normal observations + flagged incidents (status column preserved)
-    # Incidents are kept because they may represent real slow traffic needed for alerts
-
-    df_to_save = df.drop(
-        columns=["hist_median", "hist_mad", "z_mad", "status", "filter_method"],
-        errors="ignore",
-    )
+    df_to_save = df
 
     # Convert shape_id to integer (it comes as string from shape_pk in segments_gdf)
     df_to_save["shape_id"] = df_to_save["shape_id"].astype(int)
