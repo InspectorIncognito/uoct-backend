@@ -95,6 +95,9 @@ class ExpeditionData:
             curr_dist = distances[i]
 
             # Saltar puntos sin proyección válida
+            # TODO: Revisar si es necesario reiniciar el período estacionario al encontrar puntos sin proyección, 
+            # o si se pueden ignorar simplemente en la lógica de cálculo de velocidad. 
+            # Por ahora, se reinicia el seguimiento para evitar falsos positivos de estacionariedad debido a gaps en la proyección.
             if prev_dist is None or curr_dist is None:
                 # Reiniciar período estacionario si hay gaps
                 stationary_start_idx = None
@@ -177,8 +180,11 @@ class ExpeditionData:
             ).total_seconds()
             delta_distance = current_distance - previous_distance
 
-            # Validar monotonía: descartar si hay retroceso significativo
-            if delta_distance < -50:  # Permitir pequeños errores de proyección
+            # Validar monotonía: descartar si hay retroceso significativo (> 50m)
+            # TODO: Analizar bien la no monotonía con respecto a la distancia previa y actual. Ver los casos 
+            # típicos de no monotonía (ej. GPS errático, cambio de ruta, etc.) y ajustar el umbral o la lógica según corresponda.
+            # Ej de error: Expedition (519R,VPYD41,2): Skipping non-monotonic distance (prev=15406.0m, curr=9563.7m, next=9976.9m)
+            if delta_distance < -50:
                 next_gps_pulse = (
                     self.gps_points[index + 1]
                     if index + 1 < len(self.gps_points)
@@ -188,23 +194,14 @@ class ExpeditionData:
                     self.gps_distance_on_route[index + 1] if next_gps_pulse else None
                 )
                 if next_distance is not None and next_distance >= current_distance:
-                    # Si el siguiente punto es válido y avanza, asumir que el punto actual es erróneo (distancia 0)
-                    current_spatial_segment_obj = segment_criteria.get_spatial_segment(
-                        self.shape_id, current_distance
-                    )
                     print(
-                        f"{self}: Correcting non-monotonic distance segment: {self.shape_id}: {current_spatial_segment_obj}"
+                        f"{self}: Skipping non-monotonic distance "
                         f"(prev={previous_distance:.1f}m, curr={current_distance:.1f}m, next={next_distance:.1f}m)"
                     )
-                    delta_distance = 0
-                else:
-                    current_spatial_segment_obj = segment_criteria.get_spatial_segment(
-                        self.shape_id, current_distance
-                    )
-                    skipped_no_projection += 1
-                    continue
+                skipped_no_projection += 1
+                continue
 
-            # Asegurar que delta_distance sea positivo
+            # Asegurar que delta_distance sea positivo (pequeños retrocesos de proyección)
             if delta_distance < 0:
                 delta_distance = 0
 
@@ -250,6 +247,7 @@ class ExpeditionData:
             else:
                 # Calculate speed difference for interpolation between periods
                 delta_speed = delta_distance / delta_time
+
                 range_of_temporal_segments = (
                     segment_criteria.get_range_of_temporal_segments(
                         previous_gps_pulse.timestamp, gps_pulse.timestamp

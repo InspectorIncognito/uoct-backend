@@ -38,34 +38,32 @@ def precompute_direction_cache(
     use_attribute: str = "direction",
     unify_method: str = "union_all",
 ) -> DirectionCache:
-    """Precompute and cache direction group data with fast lookups."""
+    groups: Dict[int, List[int]] = {}
+
     if use_attribute not in segments_gdf.columns:
         warnings.warn(
             f"Column '{use_attribute}' not present. "
             "Inferring binary direction groups from geometry orientation."
         )
-        groups = {}
-        for idx, row in zip(segments_gdf.segment_pk, segments_gdf.itertuples()):
-            geom = row.geometry
+        # itertuples provee idx y geometry sin doble iteración
+        for row in segments_gdf.itertuples():
+            idx = row.segment_pk
             try:
-                start = geom.coords[0]
-                end = geom.coords[-1]
-                dx = end[0] - start[0]
+                geom = row.geometry
+                dx = geom.coords[-1][0] - geom.coords[0][0]
                 dir_id = 0 if dx >= 0 else 1
             except Exception:
                 dir_id = 0
             groups.setdefault(dir_id, []).append(idx)
     else:
-        groups = {}
-        for idx in segments_gdf.segment_pk:
-            try:
-                row = segments_gdf[segments_gdf.segment_pk == idx].iloc[0]
-                dir_id = int(row[use_attribute])
-            except Exception:
-                dir_id = row[use_attribute]
+        # Vectorizado: una sola pasada sobre el DataFrame — O(n)
+        seg_to_dir = (
+            segments_gdf.set_index("segment_pk")[use_attribute]
+            .apply(lambda v: int(v) if pd.notna(v) else 0)
+            .to_dict()
+        )
+        for idx, dir_id in seg_to_dir.items():
             groups.setdefault(dir_id, []).append(idx)
-
-    # debug log removed
 
     unified_lines = {}
     segments_by_direction = {}
@@ -76,9 +74,9 @@ def precompute_direction_cache(
         dir_segments = segments_gdf[segments_gdf.segment_pk.isin(segment_pk_list)]
         segments_by_direction[dir_id] = dir_segments
 
-    # Build reverse mapping
-    for seg_pk in segment_pk_list:
-        segment_to_direction[seg_pk] = dir_id
+        # Build reverse mapping
+        for seg_pk in segment_pk_list:
+            segment_to_direction[seg_pk] = dir_id
 
         # Build unified geometry
         try:
@@ -287,7 +285,8 @@ def angle_difference(bearing1: float, bearing2: float) -> float:
     b1 = normalize_bearing(bearing1)
     b2 = normalize_bearing(bearing2)
     diff = abs(b1 - b2)
-    return diff
+    # Handle wrap-around: the shortest angle between 1° and 359° is 2°, not 358°
+    return min(diff, 360 - diff)
 
 
 # OPTIMIZED: Precompute log probabilities to avoid repeated exp/log calls
@@ -306,8 +305,11 @@ def emission_prob_log(
     # Bearing weight
     if gps_bearing is not None and segment_bearing is not None:
         angle_diff = angle_difference(gps_bearing, segment_bearing)
-        log_bearing_weight = -(angle_diff**2) / (2 * sigma_bearing**2)
-        combined_log_prob = log_base_prob + bearing_weight_factor * log_bearing_weight
+        log_bearing_prob = (
+            -0.5 * np.log(2 * np.pi * sigma_bearing**2)
+            - (angle_diff**2) / (2 * sigma_bearing**2)
+        )
+        combined_log_prob = log_base_prob + bearing_weight_factor * log_bearing_prob
     else:
         combined_log_prob = log_base_prob
 
@@ -405,228 +407,166 @@ def viterbi(
     projected_points : List[Optional[Point]]
         List of length len(gps_trajectory) with projected points, None for unmatched.
     """
+    # ── Auxiliar: elige el segmento con mayor log-emisión en un timestep ──────
+    def _best_by_emission(
+        candidates: Dict[int, Tuple[Point, float, Optional[float]]],
+        gps_bearing: Optional[float],
+    ) -> Tuple[Optional[int], Optional[Point]]:
+        best_seg, best_pt, best_log = None, None, -np.inf
+        for seg_idx, (pt, dist, seg_bearing) in candidates.items():
+            e = emission_prob_log(
+                dist, sigma, gps_bearing, seg_bearing, sigma_bearing, bearing_weight_factor
+            )
+            if e > best_log:
+                best_log, best_seg, best_pt = e, seg_idx, pt
+        return best_seg, best_pt
+
+    # ── Validación inicial ────────────────────────────────────────────────────
     n_observations = len(gps_trajectory)
-    # debug log removed
     if n_observations == 0:
-        # debug log removed
         return [], [], []
 
     if excluded_indices is None:
         excluded_indices = set()
 
-    # Normalize GPS bearings once
-    normalized_gps_bearings = None
+    # Normalizar bearings GPS una sola vez
+    normalized_gps_bearings: Optional[List[Optional[float]]] = None
     if gps_bearings is not None:
         normalized_gps_bearings = [
             normalize_bearing(b) if b is not None else None for b in gps_bearings
         ]
 
-    # Filter valid observations
-    valid_observations = []
-    observation_mapping = {}
-    filtered_candidates = []
+    # ── Filtrar observaciones con candidatos válidos ──────────────────────────
+    valid_observations: List[int] = []
+    observation_mapping: Dict[int, int] = {}
+    filtered_candidates: List[Dict[int, Tuple[Point, float, Optional[float]]]] = []
 
     for i, gps_point in enumerate(gps_trajectory):
         if i in excluded_indices:
             continue
-
         candidates = nearest_edges_optimized(
             gps_point, spatial_index, segment_cache, max_distance
         )
-
         if candidates:
-            filtered_candidates.append(candidates)
             observation_mapping[len(valid_observations)] = i
             valid_observations.append(i)
+            filtered_candidates.append(candidates)
 
     if len(valid_observations) < min_candidates:
-        # debug log removed
         return [None] * n_observations, [], [None] * n_observations
 
     n_filtered = len(filtered_candidates)
 
-    # Initialize Viterbi tables
-    V = {}
-    path = {}
+    # ── Tablas Viterbi: lista de dicts por timestep (más eficiente que dict de tuplas) ──
+    V: List[Dict[int, float]] = [{} for _ in range(n_filtered)]
+    path: List[Dict[int, Optional[int]]] = [{} for _ in range(n_filtered)]
 
-    # First observation - use log probabilities
-    first_candidates = filtered_candidates[0]
+    # ── Inicialización: primera observación ──────────────────────────────────
     first_gps_idx = observation_mapping[0]
     first_gps_bearing = (
         normalized_gps_bearings[first_gps_idx] if normalized_gps_bearings else None
     )
-
-    for segment_idx, (point, dist, seg_bearing) in first_candidates.items():
-        emission_log = emission_prob_log(
-            dist,
-            sigma,
-            first_gps_bearing,
-            seg_bearing,
-            sigma_bearing,
-            bearing_weight_factor,
+    for segment_idx, (point, dist, seg_bearing) in filtered_candidates[0].items():
+        V[0][segment_idx] = emission_prob_log(
+            dist, sigma, first_gps_bearing, seg_bearing, sigma_bearing, bearing_weight_factor
         )
-        V[(0, segment_idx)] = emission_log
-        path[(0, segment_idx)] = None
+        path[0][segment_idx] = None
 
-    # Forward pass - OPTIMIZED with log probabilities
+    # ── Forward pass ─────────────────────────────────────────────────────────
     for t in range(1, n_filtered):
         curr_candidates = filtered_candidates[t]
         prev_candidates = filtered_candidates[t - 1]
 
         curr_gps_idx = observation_mapping[t]
         prev_gps_idx = observation_mapping[t - 1]
-
         curr_gps_bearing = (
             normalized_gps_bearings[curr_gps_idx] if normalized_gps_bearings else None
         )
 
-        for curr_segment_idx, (
-            curr_point,
-            curr_dist,
-            curr_seg_bearing,
-        ) in curr_candidates.items():
-            max_log_prob = -np.inf
-            best_prev_segment = None
-
+        for curr_seg_idx, (curr_point, curr_dist, curr_seg_bearing) in curr_candidates.items():
             emission_log = emission_prob_log(
-                curr_dist,
-                sigma,
-                curr_gps_bearing,
-                curr_seg_bearing,
-                sigma_bearing,
-                bearing_weight_factor,
+                curr_dist, sigma, curr_gps_bearing, curr_seg_bearing,
+                sigma_bearing, bearing_weight_factor,
             )
+            curr_direction = direction_cache.segment_to_direction.get(curr_seg_idx)
 
-            # OPTIMIZED: Direct direction lookup
-            curr_direction = direction_cache.segment_to_direction.get(curr_segment_idx)
+            max_log_prob = -np.inf
+            best_prev_seg = None
 
-            for prev_segment_idx, (prev_point, _, _) in prev_candidates.items():
-                prev_log_prob = V.get((t - 1, prev_segment_idx), -np.inf)
-
+            for prev_seg_idx, (prev_point, _, _) in prev_candidates.items():
+                prev_log_prob = V[t - 1].get(prev_seg_idx, -np.inf)
                 if prev_log_prob == -np.inf:
                     continue
 
-                # OPTIMIZED: Direct direction lookup
-                prev_direction = direction_cache.segment_to_direction.get(
-                    prev_segment_idx
-                )
-
+                prev_direction = direction_cache.segment_to_direction.get(prev_seg_idx)
                 if prev_direction != curr_direction:
                     trans_log = np.log(0.01)
                 else:
                     trans_log = transition_prob_log(
-                        prev_point,
-                        curr_point,
-                        prev_segment_idx,
-                        curr_segment_idx,
+                        prev_point, curr_point,
+                        prev_seg_idx, curr_seg_idx,
                         gps_trajectory[prev_gps_idx],
                         gps_trajectory[curr_gps_idx],
-                        beta,
-                        direction_cache,
+                        beta, direction_cache,
                     )
 
                 log_prob = prev_log_prob + trans_log + emission_log
-
                 if log_prob > max_log_prob:
                     max_log_prob = log_prob
-                    best_prev_segment = prev_segment_idx
+                    best_prev_seg = prev_seg_idx
 
             if max_log_prob > -np.inf:
-                V[(t, curr_segment_idx)] = max_log_prob
-                path[(t, curr_segment_idx)] = best_prev_segment
+                V[t][curr_seg_idx] = max_log_prob
+                path[t][curr_seg_idx] = best_prev_seg
 
-    # Backward pass
-    last_candidates = filtered_candidates[-1]
+    # ── Backward pass: encontrar mejor segmento final ────────────────────────
     max_log_prob = -np.inf
     best_last_segment = None
-
-    for segment_idx in last_candidates.keys():
-        log_prob = V.get((n_filtered - 1, segment_idx), -np.inf)
+    for segment_idx in filtered_candidates[-1].keys():
+        log_prob = V[n_filtered - 1].get(segment_idx, -np.inf)
         if log_prob > max_log_prob:
             max_log_prob = log_prob
             best_last_segment = segment_idx
 
-    # Reconstruct path
-    if best_last_segment is None:
-        # Fallback based on emission probability
-        filtered_result = []
-        filtered_projected_points = []
+    # ── Reconstrucción del camino ─────────────────────────────────────────────
+    filtered_result: List[Optional[int]] = [None] * n_filtered
+    filtered_projected_points: List[Optional[Point]] = [None] * n_filtered
 
+    if best_last_segment is None:
+        # Fallback completo: elegir por emisión en cada timestep
         for i, candidates in enumerate(filtered_candidates):
             gps_idx = observation_mapping[i]
-            gps_bearing = (
-                normalized_gps_bearings[gps_idx] if normalized_gps_bearings else None
-            )
-
-            best_segment = None
-            best_emission_log = -np.inf
-
-            for seg_idx, (point, dist, seg_bearing) in candidates.items():
-                emission_log = emission_prob_log(
-                    dist,
-                    sigma,
-                    gps_bearing,
-                    seg_bearing,
-                    sigma_bearing,
-                    bearing_weight_factor,
-                )
-                if emission_log > best_emission_log:
-                    best_emission_log = emission_log
-                    best_segment = seg_idx
-
-            filtered_result.append(best_segment)
-            filtered_projected_points.append(candidates[best_segment][0])
+            gps_bearing = normalized_gps_bearings[gps_idx] if normalized_gps_bearings else None
+            best_seg, best_pt = _best_by_emission(candidates, gps_bearing)
+            filtered_result[i] = best_seg
+            filtered_projected_points[i] = best_pt  # None si no hay candidatos
     else:
-        filtered_result = [None] * n_filtered
-        filtered_projected_points = [None] * n_filtered
         filtered_result[-1] = best_last_segment
         filtered_projected_points[-1] = filtered_candidates[-1][best_last_segment][0]
 
         for t in range(n_filtered - 2, -1, -1):
-            prev_segment = path.get((t + 1, filtered_result[t + 1]))
+            prev_segment = path[t + 1].get(filtered_result[t + 1])
 
             if prev_segment is None:
-                candidates = filtered_candidates[t]
+                # Fallback local: elegir por emisión en este timestep
                 gps_idx = observation_mapping[t]
-                gps_bearing = (
-                    normalized_gps_bearings[gps_idx]
-                    if normalized_gps_bearings
-                    else None
-                )
-
-                best_segment = None
-                best_emission_log = -np.inf
-
-                for seg_idx, (point, dist, seg_bearing) in candidates.items():
-                    emission_log = emission_prob_log(
-                        dist,
-                        sigma,
-                        gps_bearing,
-                        seg_bearing,
-                        sigma_bearing,
-                        bearing_weight_factor,
-                    )
-                    if emission_log > best_emission_log:
-                        best_emission_log = emission_log
-                        best_segment = seg_idx
-
-                filtered_result[t] = best_segment
-                filtered_projected_points[t] = candidates[best_segment][0]
+                gps_bearing = normalized_gps_bearings[gps_idx] if normalized_gps_bearings else None
+                best_seg, best_pt = _best_by_emission(filtered_candidates[t], gps_bearing)
+                filtered_result[t] = best_seg
+                filtered_projected_points[t] = best_pt  # None si no hay candidatos
             else:
                 filtered_result[t] = prev_segment
                 filtered_projected_points[t] = filtered_candidates[t][prev_segment][0]
 
-    # Map back to original indices
-    full_result = [None] * n_observations
-    full_projected_points = [None] * n_observations
+    # ── Mapear de vuelta a índices originales ─────────────────────────────────
+    full_result: List[Optional[int]] = [None] * n_observations
+    full_projected_points: List[Optional[Point]] = [None] * n_observations
 
     for filtered_idx, original_idx in observation_mapping.items():
         full_result[original_idx] = filtered_result[filtered_idx]
         full_projected_points[original_idx] = filtered_projected_points[filtered_idx]
 
-    # debug log removed
     return full_result, valid_observations, full_projected_points
-
 
 #############################
 # Cache Precomputation Layer #
@@ -708,9 +648,9 @@ def match_trajectory_to_axes(
 
     # debug log removed
 
-    results: Dict[str, Tuple[List[Optional[int]], List[int], List[Optional[Point]]]] = (
-        {}
-    )
+    results: Dict[
+        str, Tuple[List[Optional[int]], List[int], List[Optional[Point]]]
+    ] = {}
     excluded_indices = set() if remove_matched_points else None
 
     for axis_id, segments_gdf in axes_dict.items():

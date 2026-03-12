@@ -8,10 +8,9 @@ from geojson.feature import Feature
 from geojson.geometry import LineString
 from gtfs_rt.utils import get_day_type, get_last_temporal_range, get_temporal_segment
 from processors.geometry.point import Point
+from rest_api.vars import SPEED_COLOR_RANGES
 from shapely.geometry import LineString as shp_LineString
 from velocity.constants import DEG_PI, DEG_PI_HALF
-
-from rest_api.vars import SPEED_COLOR_RANGES
 
 
 class Shape(models.Model):

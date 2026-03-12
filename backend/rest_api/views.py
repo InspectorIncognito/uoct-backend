@@ -11,12 +11,6 @@ from geojson import Feature, FeatureCollection, Point
 from gtfs_rt.processors.speed import calculate_speed
 from gtfs_rt.utils import get_last_temporal_range, get_previous_month
 from processors.models.shapes import shapes_to_geojson
-from rest_framework import generics, mixins, viewsets
-from rest_framework.filters import OrderingFilter
-from rest_framework.permissions import AllowAny
-from velocity.grid import GridManager
-from velocity.gtfs import GTFSManager
-
 from rest_api.models import (
     Alert,
     AlertThreshold,
@@ -46,6 +40,11 @@ from rest_api.serializers import (
     StopSerializer,
     TrafficSignalSerializer,
 )
+from rest_framework import generics, mixins, viewsets
+from rest_framework.filters import OrderingFilter
+from rest_framework.permissions import AllowAny
+from velocity.grid import GridManager
+from velocity.gtfs import GTFSManager
 
 
 class TestView(generics.GenericAPIView):
@@ -174,8 +173,11 @@ class GenericSpeedViewSet(viewsets.ModelViewSet, mixins.ListModelMixin):
 
     @staticmethod
     def csv_generator(queryset, fieldnames_dict):
+        """Generate CSV rows efficiently using iterator to avoid loading all data in memory."""
         yield ",".join(list(fieldnames_dict.values())) + "\n"
-        for obj in queryset:
+        # Use iterator() with chunk_size to process data in batches
+        # This prevents loading millions of records into memory at once
+        for obj in queryset.iterator(chunk_size=2000):
             fieldnames = list(fieldnames_dict.keys())
             row = []
             for field in fieldnames:
@@ -279,10 +281,14 @@ class SpeedViewSet(GenericSpeedViewSet):
 
     @staticmethod
     def csv_generator_local_tz(queryset, fieldnames_dict):
-        """Generate CSV with timestamps, temporal_segment and day_type converted to America/Santiago timezone."""
+        """Generate CSV with timestamps, temporal_segment and day_type converted to America/Santiago timezone.
+
+        Uses iterator() to process data in chunks, preventing memory exhaustion on large datasets.
+        """
         santiago_tz = ZoneInfo("America/Santiago")
         yield ",".join(list(fieldnames_dict.values())) + "\n"
-        for obj in queryset:
+        # Use iterator() with chunk_size to process data in batches
+        for obj in queryset.iterator(chunk_size=2000):
             fieldnames = list(fieldnames_dict.keys())
             row = []
             # Convert timestamp once and cache local datetime for reuse
@@ -369,10 +375,14 @@ class HistoricSpeedViewSet(GenericSpeedViewSet):
 
     @staticmethod
     def csv_generator_historic_local_tz(queryset, fieldnames_dict):
-        """Generate CSV with timestamps, temporal_segment and day_type converted to America/Santiago timezone."""
+        """Generate CSV with timestamps, temporal_segment and day_type converted to America/Santiago timezone.
+
+        Uses iterator() to process data in chunks, preventing memory exhaustion on large datasets.
+        """
         santiago_tz = ZoneInfo("America/Santiago")
         yield ",".join(list(fieldnames_dict.values())) + "\n"
-        for obj in queryset:
+        # Use iterator() with chunk_size to process data in batches
+        for obj in queryset.iterator(chunk_size=2000):
             fieldnames = list(fieldnames_dict.keys())
             row = []
             # Convert timestamp once and cache local datetime for reuse
