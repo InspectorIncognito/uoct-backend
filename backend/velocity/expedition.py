@@ -25,6 +25,9 @@ class ExpeditionData:
     MAXIMUM_ACCEPTABLE_TIME_BETWEEN_GPS_PULSES = 60 * 10  # in seconds
     MAXIMUM_STATIONARY_TIME = 60 * 5  # 5 minutos (300 segundos)
     MINIMUM_MOVEMENT_THRESHOLD = 5  # metros mínimos para considerar movimiento
+    NON_MONOTONIC_DISTANCE_THRESHOLD = (
+        -50
+    )  # metros; retrocesos mayores a esto se descartan
 
     def __init__(
         self,
@@ -44,11 +47,11 @@ class ExpeditionData:
         self.gps_points = []
         self.gps_distance_to_route = []
         self.gps_distance_on_route = []
-        self.gps_distance_on_route_dict = dict()
 
         self.ignored_gps_pulses = 0
         self.ignored_segments_because_time_between_gps_pulses = 0
         self.ignored_segments_because_stationary = 0
+        self.ignored_segments_because_non_monotonic = 0
 
     def add_gps_point(self, gps_pulse: GPS):
         if len(self.gps_points) == 0:
@@ -56,10 +59,8 @@ class ExpeditionData:
         elif gps_pulse.timestamp > self.gps_points[-1].timestamp:
             self.gps_points.append(gps_pulse)
         elif gps_pulse.timestamp == self.gps_points[-1].timestamp:
-            # print(f'gps point {gps_pulse} is equal to previous gps point {gps_pulse}.')
             self.ignored_gps_pulses += 1
         elif gps_pulse.timestamp < self.gps_points[-1].timestamp:
-            # print(f'gps point {gps_pulse} is older than latest gps point {gps_pulse}.')
             self.ignored_gps_pulses += 1
 
     def _get_stationary_indices(self) -> set[int]:
@@ -88,20 +89,20 @@ class ExpeditionData:
         indices_to_exclude = set()
         stationary_start_idx = None
         stationary_start_time = None
-        threshold_exceeded = False  # Flag para saber si ya se superó el umbral
+        threshold_crossed = False  # True desde que el período supera el umbral
 
         for i in range(1, n_points):
             prev_dist = distances[i - 1]
             curr_dist = distances[i]
 
             # Saltar puntos sin proyección válida
-            # TODO: Revisar si es necesario reiniciar el período estacionario al encontrar puntos sin proyección, 
-            # o si se pueden ignorar simplemente en la lógica de cálculo de velocidad. 
+            # TODO: Revisar si es necesario reiniciar el período estacionario al encontrar puntos sin proyección,
+            # o si se pueden ignorar simplemente en la lógica de cálculo de velocidad.
             # Por ahora, se reinicia el seguimiento para evitar falsos positivos de estacionariedad debido a gaps en la proyección.
             if prev_dist is None or curr_dist is None:
                 # Reiniciar período estacionario si hay gaps
                 stationary_start_idx = None
-                threshold_exceeded = False
+                threshold_crossed = False
                 continue
 
             delta_distance = abs(curr_dist - prev_dist)
@@ -111,22 +112,26 @@ class ExpeditionData:
                 if stationary_start_idx is None:
                     stationary_start_idx = i - 1
                     stationary_start_time = points[i - 1].timestamp
-                    threshold_exceeded = False
+                    threshold_crossed = False
 
                 # Verificar duración acumulada
                 elapsed = (points[i].timestamp - stationary_start_time).total_seconds()
 
                 if elapsed >= max_stationary:
-                    if not threshold_exceeded:
-                        # Primera vez que se supera el umbral - marcar este índice
-                        threshold_exceeded = True
-                    # Solo agregar índices a partir de que se superó el umbral
-                    indices_to_exclude.add(i)
+                    if not threshold_crossed:
+                        # Primera vez que se supera el umbral: excluir todo el rango
+                        # desde el inicio del período estacionario hasta el índice actual.
+                        for j in range(stationary_start_idx, i + 1):
+                            indices_to_exclude.add(j)
+                        threshold_crossed = True
+                    else:
+                        # Umbral ya cruzado: solo añadir el índice actual
+                        indices_to_exclude.add(i)
             else:
                 # Movimiento detectado - reiniciar tracking
                 stationary_start_idx = None
                 stationary_start_time = None
-                threshold_exceeded = False
+                threshold_crossed = False
 
         return indices_to_exclude
 
@@ -144,14 +149,13 @@ class ExpeditionData:
             self.gps_points
         ):
             if self.shape_id is None:
-                raise ValueError
+                raise ValueError(
+                    f"{self} has no shape_id assigned. HMM map-matching may not have run."
+                )
             raise ValueError(
                 f"{self} does not have distance_on_route calculated. "
                 f"Expected {len(self.gps_points)} distances, got {len(self.gps_distance_on_route) if self.gps_distance_on_route else 0}."
             )
-
-        # Contador de puntos descartados por falta de proyección HMM
-        skipped_no_projection = 0
 
         # Obtener índices de períodos estacionarios (O(n) pre-cálculo)
         stationary_indices = self._get_stationary_indices()
@@ -171,7 +175,6 @@ class ExpeditionData:
             # Descartar pulsos GPS que no fueron matcheados por el HMM
             # Estos tienen None en gps_distance_on_route
             if previous_distance is None or current_distance is None:
-                skipped_no_projection += 1
                 continue
 
             # calculate distance and time difference
@@ -180,11 +183,11 @@ class ExpeditionData:
             ).total_seconds()
             delta_distance = current_distance - previous_distance
 
-            # Validar monotonía: descartar si hay retroceso significativo (> 50m)
-            # TODO: Analizar bien la no monotonía con respecto a la distancia previa y actual. Ver los casos 
+            # Validar monotonía: descartar si hay retroceso significativo
+            # TODO: Analizar bien la no monotonía con respecto a la distancia previa y actual. Ver los casos
             # típicos de no monotonía (ej. GPS errático, cambio de ruta, etc.) y ajustar el umbral o la lógica según corresponda.
             # Ej de error: Expedition (519R,VPYD41,2): Skipping non-monotonic distance (prev=15406.0m, curr=9563.7m, next=9976.9m)
-            if delta_distance < -50:
+            if delta_distance < self.NON_MONOTONIC_DISTANCE_THRESHOLD:
                 next_gps_pulse = (
                     self.gps_points[index + 1]
                     if index + 1 < len(self.gps_points)
@@ -193,17 +196,23 @@ class ExpeditionData:
                 next_distance = (
                     self.gps_distance_on_route[index + 1] if next_gps_pulse else None
                 )
-                if next_distance is not None and next_distance >= current_distance:
-                    print(
-                        f"{self}: Skipping non-monotonic distance "
-                        f"(prev={previous_distance:.1f}m, curr={current_distance:.1f}m, next={next_distance:.1f}m)"
-                    )
-                skipped_no_projection += 1
+                print(
+                    f"{self}: Skipping non-monotonic distance "
+                    f"(prev={previous_distance:.1f}m, curr={current_distance:.1f}m, "
+                    f"next={next_distance:.1f}m)"
+                    if next_distance is not None
+                    else f"{self}: Skipping non-monotonic distance "
+                    f"(prev={previous_distance:.1f}m, curr={current_distance:.1f}m, next=None)"
+                )
+                self.ignored_segments_because_non_monotonic += 1
                 continue
 
-            # Asegurar que delta_distance sea positivo (pequeños retrocesos de proyección)
+            # Asegurar que delta_distance sea positivo (pequeños retrocesos de proyección HMM)
+            # Retrocesos entre 0 y NON_MONOTONIC_DISTANCE_THRESHOLD se descartan para evitar
+            # generar filas con distance_mts=0 que sesguen la velocidad promedio hacia abajo.
             if delta_distance < 0:
-                delta_distance = 0
+                self.ignored_segments_because_non_monotonic += 1
+                continue
 
             if delta_time >= self.MAXIMUM_ACCEPTABLE_TIME_BETWEEN_GPS_PULSES:
                 print(
