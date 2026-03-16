@@ -58,9 +58,10 @@ class VehicleManager:
         longitude = gps_pulse.x
         latitude = gps_pulse.y
         bearing = gps_data.bearing
-        vehicle_data = VehicleData(self.grid_manager, license_plate=license_plate)
-        if vehicle_data not in self.vehicles:
-            self.vehicles[vehicle_data] = vehicle_data
+        vehicle_data = self.vehicles.get(license_plate)
+        if vehicle_data is None:
+            vehicle_data = VehicleData(self.grid_manager, license_plate=license_plate)
+            self.vehicles[license_plate] = vehicle_data
         try:
             if direction is not None:
                 direction_str = "I" if direction == 0 else "R"
@@ -75,7 +76,7 @@ class VehicleManager:
                 timestamp=timestamp,
                 direction=direction,
             )
-            self.vehicles[vehicle_data].add_gps_pulse(gps_obj, route_id, license_plate)
+            vehicle_data.add_gps_pulse(gps_obj, route_id, license_plate)
         except ValueError:
             pass
             # print(e)
@@ -84,10 +85,10 @@ class VehicleManager:
         records = []
         expeditions_ignored = []
         total_expeditions = 0
-        for vehicle in self.vehicles:
+        for vehicle in self.vehicles.values():
             # print(f"Processing vehicle {vehicle}...")
-            total_expeditions += len(self.vehicles[vehicle].expeditions)
-            for expedition in self.vehicles[vehicle].expeditions:
+            total_expeditions += len(vehicle.expeditions)
+            for expedition in vehicle.expeditions:
                 try:
                     exp_records = expedition.calculate_speed(segment_criteria)
                     records.extend(exp_records)

@@ -65,8 +65,12 @@ def _get_num_workers() -> int:
     hmm_workers_setting = getattr(settings, "HMM_NUM_WORKERS", "auto")
 
     if hmm_workers_setting == "auto" or hmm_workers_setting is None:
-        # Auto-detect: use cpu_count - 1, capped at 8
-        available_cpus = cpu_count() or 4
+        # Auto-detect:
+        # - Small instances (<=2 vCPU): use all CPUs
+        # - Larger instances: keep one CPU available for system/DB/network tasks
+        available_cpus = cpu_count() or 2
+        if available_cpus <= 2:
+            return available_cpus
         return min(max(1, available_cpus - 1), 8)
 
     try:
@@ -74,7 +78,9 @@ def _get_num_workers() -> int:
         return max(1, num_workers)
     except (ValueError, TypeError):
         # Fallback to auto-detect
-        available_cpus = cpu_count() or 4
+        available_cpus = cpu_count() or 2
+        if available_cpus <= 2:
+            return available_cpus
         return min(max(1, available_cpus - 1), 8)
 
 
