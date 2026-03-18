@@ -1,6 +1,9 @@
+import gzip
+import io
 import json
+import os
+import threading
 from datetime import datetime
-from zoneinfo import ZoneInfo
 
 from django.core.management import call_command
 from django.db.models import ExpressionWrapper, F, FloatField
@@ -172,21 +175,113 @@ class GenericSpeedViewSet(viewsets.ModelViewSet, mixins.ListModelMixin):
         return queryset
 
     @staticmethod
-    def csv_generator(queryset, fieldnames_dict):
-        """Generate CSV rows efficiently using iterator to avoid loading all data in memory."""
-        yield ",".join(list(fieldnames_dict.values())) + "\n"
-        # Use iterator() with chunk_size to process data in batches
-        # This prevents loading millions of records into memory at once
-        for obj in queryset.iterator(chunk_size=2000):
-            fieldnames = list(fieldnames_dict.keys())
-            row = []
-            for field in fieldnames:
-                value = obj[field]
-                # Join list fields with semicolon to avoid CSV delimiter conflicts
-                if isinstance(value, list):
-                    value = ";".join(str(v) for v in value) if value else ""
-                row.append(str(value))
-            yield ",".join(row) + "\n"
+    def _build_where_clause(query_params, alias):
+        """Translate DRF query params into a parameterized SQL WHERE clause.
+
+        Returns (where_sql, params_list). Does NOT include a default filter —
+        callers must inject one when query_params is empty.
+        ``alias`` is the SQL table alias used for the speed/historic-speed table
+        (e.g. 'sp' for Speed, 'hs' for HistoricSpeed).
+        """
+        clauses = []
+        params = []
+
+        month = query_params.get("month")
+        start_time = query_params.get("startTime")
+        end_time = query_params.get("endTime")
+        day_type = query_params.get("dayType")
+        temporal_segment = query_params.get("temporalSegment")
+
+        if month is not None:
+            year = timezone.now().year
+            clauses.append(f"EXTRACT(YEAR  FROM {alias}.timestamp) = %s")
+            clauses.append(f"EXTRACT(MONTH FROM {alias}.timestamp) = %s")
+            params.extend([year, int(month)])
+        if start_time is not None and end_time is not None:
+            start_dt = timezone.make_aware(
+                datetime.strptime(start_time, "%Y-%m-%dT%H:%M:%SZ"), timezone.utc
+            )
+            end_dt = timezone.make_aware(
+                datetime.strptime(end_time, "%Y-%m-%dT%H:%M:%SZ"), timezone.utc
+            )
+            clauses.append(f"{alias}.timestamp >= %s AND {alias}.timestamp <= %s")
+            params.extend([start_dt, end_dt])
+        if day_type is not None:
+            clauses.append(f"{alias}.day_type = %s")
+            params.append(day_type)
+        if temporal_segment is not None:
+            clauses.append(f"{alias}.temporal_segment = %s")
+            params.append(int(temporal_segment))
+
+        where = f"WHERE {' AND '.join(clauses)}" if clauses else ""
+        return where, params
+
+    @staticmethod
+    def _copy_stream(copy_sql, params, compress=False):
+        """Generator that streams PostgreSQL COPY TO STDOUT output.
+
+        ``copy_sql`` is a string with ``%s`` placeholders (psycopg2 format).
+        ``params`` is a list/tuple of values to bind.
+        When ``compress=True`` the output is gzip-compressed on-the-fly in 64 KB
+        chunks using a background thread + os.pipe so that ``copy_expert``'s
+        blocking writes never stall the HTTP response generator.
+        """
+        error_holder = [None]
+        read_fd, write_fd = os.pipe()
+
+        def _worker():
+            from django.db import connection as _conn  # thread-local connection
+
+            try:
+                with os.fdopen(write_fd, "wb") as pipe_w:
+                    with _conn.cursor() as cursor:
+                        final_sql = cursor.mogrify(copy_sql, params)
+                        cursor.copy_expert(final_sql, pipe_w)
+            except Exception as exc:
+                error_holder[0] = exc
+                # Ensure write-end is closed so the reader unblocks
+                try:
+                    os.close(write_fd)
+                except OSError:
+                    pass
+            finally:
+                _conn.close()  # Release thread-local connection
+
+        thread = threading.Thread(target=_worker, daemon=True)
+        thread.start()
+
+        if compress:
+            gz_buf = io.BytesIO()
+            gz = gzip.GzipFile(fileobj=gz_buf, mode="wb")
+            with os.fdopen(read_fd, "rb") as pipe_r:
+                while True:
+                    chunk = pipe_r.read(65536)
+                    if not chunk:
+                        break
+                    gz.write(chunk)
+                    gz.flush()  # flushes zlib buffer to gz_buf
+                    gz_buf.seek(0)
+                    data = gz_buf.read()
+                    if data:
+                        yield data
+                    gz_buf.seek(0)
+                    gz_buf.truncate(0)
+            gz.close()
+            gz_buf.seek(0)
+            tail = gz_buf.read()
+            if tail:
+                yield tail
+        else:
+            with os.fdopen(read_fd, "rb") as pipe_r:
+                while True:
+                    chunk = pipe_r.read(65536)
+                    if not chunk:
+                        break
+                    yield chunk
+
+        thread.join()
+        if error_holder[0] is not None:
+            raise error_holder[0]
 
 
 class SpeedViewSet(GenericSpeedViewSet):
@@ -206,113 +301,170 @@ class SpeedViewSet(GenericSpeedViewSet):
     ordering = ["-timestamp"]  # Default ordering
 
     def to_csv(self, request, *args, **kwargs):
-        query_params = request.query_params
-        queryset = self.get_queryset().values(
-            "segment__shape",
-            "segment__sequence",
-            "temporal_segment",
-            "day_type",
-            "distance",
-            "time_secs",
-            "timestamp",
-            "services",
-        )
-        if len(query_params) == 0:
-            start_time, end_time = get_last_temporal_range()
-            queryset = queryset.filter(
-                timestamp__gte=start_time,
-                timestamp__lte=end_time,
-            )
-        fieldnames_dict = dict(
-            segment__shape="shape",
-            segment__sequence="sequence",
-            temporal_segment="temporal_segment",
-            day_type="day_type",
-            distance="distance",
-            time_secs="time_secs",
-            timestamp="timestamp",
-            services="active_services",
-        )
-        response = StreamingHttpResponse(
-            self.csv_generator(queryset, fieldnames_dict), content_type="text/csv"
-        )
-        response["Content-Disposition"] = 'attachment; filename="segment_speeds.csv"'
+        where_sql, params = self._build_where_clause(request.query_params, alias="sp")
 
-        return response
+        if len(request.query_params) == 0:
+            start_time, end_time = get_last_temporal_range()
+            if where_sql:
+                where_sql += " AND sp.timestamp >= %s AND sp.timestamp <= %s"
+            else:
+                where_sql = "WHERE sp.timestamp >= %s AND sp.timestamp <= %s"
+            params.extend([start_time, end_time])
+
+        copy_sql = f"""
+            COPY (
+                SELECT
+                    sg.shape_id AS shape,
+                    sg.sequence AS sequence,
+                    sp.temporal_segment,
+                    sp.day_type,
+                    sp.distance,
+                    sp.time_secs,
+                    sp.timestamp,
+                    array_to_string(sp.services, ';') AS active_services
+                FROM rest_api_speed sp
+                INNER JOIN rest_api_segment sg
+                    ON sp.segment_id = sg.segment_id
+                {where_sql}
+                ORDER BY sg.shape_id, sg.sequence, sp.temporal_segment
+            ) TO STDOUT WITH CSV HEADER
+        """
+        return StreamingHttpResponse(
+            self._copy_stream(copy_sql, params, compress=False),
+            content_type="text/csv",
+            headers={
+                "Content-Disposition": 'attachment; filename="segment_speeds.csv"',
+            },
+        )
+
+    def to_csv_gz(self, request, *args, **kwargs):
+        where_sql, params = self._build_where_clause(request.query_params, alias="sp")
+
+        if len(request.query_params) == 0:
+            start_time, end_time = get_last_temporal_range()
+            if where_sql:
+                where_sql += " AND sp.timestamp >= %s AND sp.timestamp <= %s"
+            else:
+                where_sql = "WHERE sp.timestamp >= %s AND sp.timestamp <= %s"
+            params.extend([start_time, end_time])
+
+        copy_sql = f"""
+            COPY (
+                SELECT
+                    sg.shape_id AS shape,
+                    sg.sequence AS sequence,
+                    sp.temporal_segment,
+                    sp.day_type,
+                    sp.distance,
+                    sp.time_secs,
+                    sp.timestamp,
+                    array_to_string(sp.services, ';') AS active_services
+                FROM rest_api_speed sp
+                INNER JOIN rest_api_segment sg
+                    ON sp.segment_id = sg.segment_id
+                {where_sql}
+                ORDER BY sg.shape_id, sg.sequence, sp.temporal_segment
+            ) TO STDOUT WITH CSV HEADER
+        """
+        return StreamingHttpResponse(
+            self._copy_stream(copy_sql, params, compress=True),
+            content_type="application/gzip",
+            headers={
+                "Content-Disposition": 'attachment; filename="segment_speeds.csv.gz"',
+            },
+        )
 
     def to_csv_local(self, request, *args, **kwargs):
-        """Export CSV with timestamps converted to America/Santiago timezone."""
-        query_params = request.query_params
-        queryset = self.get_queryset().values(
-            "segment__shape",
-            "segment__sequence",
-            "temporal_segment",
-            "day_type",
-            "distance",
-            "time_secs",
-            "timestamp",
-            "services",
-        )
-        if len(query_params) == 0:
+        where_sql, params = self._build_where_clause(request.query_params, alias="sp")
+
+        if len(request.query_params) == 0:
             start_time, end_time = get_last_temporal_range()
-            queryset = queryset.filter(
-                timestamp__gte=start_time,
-                timestamp__lte=end_time,
-            )
-        fieldnames_dict = dict(
-            segment__shape="shape",
-            segment__sequence="sequence",
-            temporal_segment="temporal_segment",
-            day_type="day_type",
-            distance="distance",
-            time_secs="time_secs",
-            timestamp="timestamp",
-            services="active_services",
-        )
-        response = StreamingHttpResponse(
-            self.csv_generator_local_tz(queryset, fieldnames_dict),
-            content_type="text/csv",
-        )
-        response["Content-Disposition"] = (
-            'attachment; filename="segment_speeds_local.csv"'
-        )
+            if where_sql:
+                where_sql += " AND sp.timestamp >= %s AND sp.timestamp <= %s"
+            else:
+                where_sql = "WHERE sp.timestamp >= %s AND sp.timestamp <= %s"
+            params.extend([start_time, end_time])
 
-        return response
-
-    @staticmethod
-    def csv_generator_local_tz(queryset, fieldnames_dict):
-        """Generate CSV with timestamps, temporal_segment and day_type converted to America/Santiago timezone.
-
-        Uses iterator() to process data in chunks, preventing memory exhaustion on large datasets.
+        copy_sql = f"""
+            COPY (
+                SELECT
+                    sg.shape_id AS shape,
+                    sg.sequence AS sequence,
+                    FLOOR(
+                        (
+                            EXTRACT(HOUR FROM (sp.timestamp AT TIME ZONE 'America/Santiago')) * 60
+                            + EXTRACT(MINUTE FROM (sp.timestamp AT TIME ZONE 'America/Santiago'))
+                        ) / 15
+                    )::int AS temporal_segment,
+                    CASE
+                        WHEN EXTRACT(ISODOW FROM (sp.timestamp AT TIME ZONE 'America/Santiago')) BETWEEN 1 AND 5 THEN 'L'
+                        WHEN EXTRACT(ISODOW FROM (sp.timestamp AT TIME ZONE 'America/Santiago')) = 6 THEN 'S'
+                        ELSE 'D'
+                    END AS day_type,
+                    sp.distance,
+                    sp.time_secs,
+                    (sp.timestamp AT TIME ZONE 'America/Santiago') AS timestamp,
+                    array_to_string(sp.services, ';') AS active_services
+                FROM rest_api_speed sp
+                INNER JOIN rest_api_segment sg
+                    ON sp.segment_id = sg.segment_id
+                {where_sql}
+                ORDER BY sg.shape_id, sg.sequence, temporal_segment
+            ) TO STDOUT WITH CSV HEADER
         """
-        santiago_tz = ZoneInfo("America/Santiago")
-        yield ",".join(list(fieldnames_dict.values())) + "\n"
-        # Use iterator() with chunk_size to process data in batches
-        for obj in queryset.iterator(chunk_size=2000):
-            fieldnames = list(fieldnames_dict.keys())
-            row = []
-            # Convert timestamp once and cache local datetime for reuse
-            local_dt = None
-            if obj.get("timestamp") is not None:
-                local_dt = obj["timestamp"].astimezone(santiago_tz)
+        return StreamingHttpResponse(
+            self._copy_stream(copy_sql, params, compress=False),
+            content_type="text/csv",
+            headers={
+                "Content-Disposition": 'attachment; filename="segment_speeds_local.csv"',
+            },
+        )
 
-            for field in fieldnames:
-                value = obj[field]
-                if local_dt is not None:
-                    if field == "timestamp":
-                        value = local_dt.strftime("%Y-%m-%dT%H:%M:%S")
-                    elif field == "temporal_segment":
-                        # Recalculate: (hour * 60 + minute) // 15
-                        value = (local_dt.hour * 60 + local_dt.minute) // 15
-                    elif field == "day_type":
-                        # Recalculate: L (Mon-Fri), S (Sat), D (Sun)
-                        weekday = local_dt.weekday()
-                        value = "L" if weekday < 5 else ("S" if weekday == 5 else "D")
-                # Join list fields with semicolon to avoid CSV delimiter conflicts
-                if isinstance(value, list):
-                    value = ";".join(str(v) for v in value) if value else ""
-                row.append(str(value))
-            yield ",".join(row) + "\n"
+    def to_csv_local_gz(self, request, *args, **kwargs):
+        where_sql, params = self._build_where_clause(request.query_params, alias="sp")
+
+        if len(request.query_params) == 0:
+            start_time, end_time = get_last_temporal_range()
+            if where_sql:
+                where_sql += " AND sp.timestamp >= %s AND sp.timestamp <= %s"
+            else:
+                where_sql = "WHERE sp.timestamp >= %s AND sp.timestamp <= %s"
+            params.extend([start_time, end_time])
+
+        copy_sql = f"""
+            COPY (
+                SELECT
+                    sg.shape_id AS shape,
+                    sg.sequence AS sequence,
+                    FLOOR(
+                        (
+                            EXTRACT(HOUR FROM (sp.timestamp AT TIME ZONE 'America/Santiago')) * 60
+                            + EXTRACT(MINUTE FROM (sp.timestamp AT TIME ZONE 'America/Santiago'))
+                        ) / 15
+                    )::int AS temporal_segment,
+                    CASE
+                        WHEN EXTRACT(ISODOW FROM (sp.timestamp AT TIME ZONE 'America/Santiago')) BETWEEN 1 AND 5 THEN 'L'
+                        WHEN EXTRACT(ISODOW FROM (sp.timestamp AT TIME ZONE 'America/Santiago')) = 6 THEN 'S'
+                        ELSE 'D'
+                    END AS day_type,
+                    sp.distance,
+                    sp.time_secs,
+                    (sp.timestamp AT TIME ZONE 'America/Santiago') AS timestamp,
+                    array_to_string(sp.services, ';') AS active_services
+                FROM rest_api_speed sp
+                INNER JOIN rest_api_segment sg
+                    ON sp.segment_id = sg.segment_id
+                {where_sql}
+                ORDER BY sg.shape_id, sg.sequence, temporal_segment
+            ) TO STDOUT WITH CSV HEADER
+        """
+        return StreamingHttpResponse(
+            self._copy_stream(copy_sql, params, compress=True),
+            content_type="application/gzip",
+            headers={
+                "Content-Disposition": 'attachment; filename="segment_speeds_local.csv.gz"',
+            },
+        )
 
 
 class HistoricSpeedViewSet(GenericSpeedViewSet):
@@ -320,93 +472,160 @@ class HistoricSpeedViewSet(GenericSpeedViewSet):
     queryset = HistoricSpeed.objects.all().order_by("segment")
 
     def to_csv(self, request, *args, **kwargs):
-        queryset = self.get_queryset().values(
-            "segment__shape",
-            "segment__sequence",
-            "temporal_segment",
-            "day_type",
-            "speed",
-        )
+        where_sql, params = self._build_where_clause(request.query_params, alias="hs")
+
         if len(request.query_params) == 0:
             previous_month = get_previous_month()
-            queryset = queryset.filter(timestamp__month=previous_month)
-        fieldnames_dict = dict(
-            segment__shape="shape",
-            segment__sequence="sequence",
-            temporal_segment="temporal_segment",
-            day_type="day_type",
-            speed="speed",
+            if where_sql:
+                where_sql += " AND EXTRACT(MONTH FROM hs.timestamp) = %s"
+            else:
+                where_sql = "WHERE EXTRACT(MONTH FROM hs.timestamp) = %s"
+            params.append(previous_month)
+
+        copy_sql = f"""
+            COPY (
+                SELECT
+                    sg.shape_id AS shape,
+                    sg.sequence AS sequence,
+                    hs.temporal_segment,
+                    hs.day_type,
+                    hs.speed
+                FROM rest_api_historicspeed hs
+                INNER JOIN rest_api_segment sg
+                    ON hs.segment_id = sg.segment_id
+                {where_sql}
+                ORDER BY sg.shape_id, sg.sequence, hs.temporal_segment
+            ) TO STDOUT WITH CSV HEADER
+        """
+        return StreamingHttpResponse(
+            self._copy_stream(copy_sql, params, compress=False),
+            content_type="text/csv",
+            headers={
+                "Content-Disposition": 'attachment; filename="historic_speeds.csv"',
+            },
         )
-        response = StreamingHttpResponse(
-            self.csv_generator(queryset, fieldnames_dict), content_type="text/csv"
+
+    def to_csv_gz(self, request, *args, **kwargs):
+        where_sql, params = self._build_where_clause(request.query_params, alias="hs")
+
+        if len(request.query_params) == 0:
+            previous_month = get_previous_month()
+            if where_sql:
+                where_sql += " AND EXTRACT(MONTH FROM hs.timestamp) = %s"
+            else:
+                where_sql = "WHERE EXTRACT(MONTH FROM hs.timestamp) = %s"
+            params.append(previous_month)
+
+        copy_sql = f"""
+            COPY (
+                SELECT
+                    sg.shape_id AS shape,
+                    sg.sequence AS sequence,
+                    hs.temporal_segment,
+                    hs.day_type,
+                    hs.speed
+                FROM rest_api_historicspeed hs
+                INNER JOIN rest_api_segment sg
+                    ON hs.segment_id = sg.segment_id
+                {where_sql}
+                ORDER BY sg.shape_id, sg.sequence, hs.temporal_segment
+            ) TO STDOUT WITH CSV HEADER
+        """
+        return StreamingHttpResponse(
+            self._copy_stream(copy_sql, params, compress=True),
+            content_type="application/gzip",
+            headers={
+                "Content-Disposition": 'attachment; filename="historic_speeds.csv.gz"',
+            },
         )
-        response["Content-Disposition"] = 'attachment; filename="segment_speeds.csv"'
-        return response
 
     def to_csv_local(self, request, *args, **kwargs):
-        """Export CSV with timestamps converted to America/Santiago timezone."""
-        queryset = self.get_queryset().values(
-            "segment__shape",
-            "segment__sequence",
-            "temporal_segment",
-            "day_type",
-            "speed",
-            "timestamp",
-        )
+        where_sql, params = self._build_where_clause(request.query_params, alias="hs")
+
         if len(request.query_params) == 0:
             previous_month = get_previous_month()
-            queryset = queryset.filter(timestamp__month=previous_month)
-        fieldnames_dict = dict(
-            segment__shape="shape",
-            segment__sequence="sequence",
-            temporal_segment="temporal_segment",
-            day_type="day_type",
-            speed="speed",
-            timestamp="timestamp",
-        )
-        response = StreamingHttpResponse(
-            self.csv_generator_historic_local_tz(queryset, fieldnames_dict),
-            content_type="text/csv",
-        )
-        response["Content-Disposition"] = (
-            'attachment; filename="historic_speeds_local.csv"'
-        )
-        return response
+            if where_sql:
+                where_sql += " AND EXTRACT(MONTH FROM hs.timestamp) = %s"
+            else:
+                where_sql = "WHERE EXTRACT(MONTH FROM hs.timestamp) = %s"
+            params.append(previous_month)
 
-    @staticmethod
-    def csv_generator_historic_local_tz(queryset, fieldnames_dict):
-        """Generate CSV with timestamps, temporal_segment and day_type converted to America/Santiago timezone.
-
-        Uses iterator() to process data in chunks, preventing memory exhaustion on large datasets.
+        copy_sql = f"""
+            COPY (
+                SELECT
+                    sg.shape_id AS shape,
+                    sg.sequence AS sequence,
+                    FLOOR(
+                        (
+                            EXTRACT(HOUR FROM (hs.timestamp AT TIME ZONE 'America/Santiago')) * 60
+                            + EXTRACT(MINUTE FROM (hs.timestamp AT TIME ZONE 'America/Santiago'))
+                        ) / 15
+                    )::int AS temporal_segment,
+                    CASE
+                        WHEN EXTRACT(ISODOW FROM (hs.timestamp AT TIME ZONE 'America/Santiago')) BETWEEN 1 AND 5 THEN 'L'
+                        WHEN EXTRACT(ISODOW FROM (hs.timestamp AT TIME ZONE 'America/Santiago')) = 6 THEN 'S'
+                        ELSE 'D'
+                    END AS day_type,
+                    hs.speed,
+                    (hs.timestamp AT TIME ZONE 'America/Santiago') AS timestamp
+                FROM rest_api_historicspeed hs
+                INNER JOIN rest_api_segment sg
+                    ON hs.segment_id = sg.segment_id
+                {where_sql}
+                ORDER BY sg.shape_id, sg.sequence, temporal_segment
+            ) TO STDOUT WITH CSV HEADER
         """
-        santiago_tz = ZoneInfo("America/Santiago")
-        yield ",".join(list(fieldnames_dict.values())) + "\n"
-        # Use iterator() with chunk_size to process data in batches
-        for obj in queryset.iterator(chunk_size=2000):
-            fieldnames = list(fieldnames_dict.keys())
-            row = []
-            # Convert timestamp once and cache local datetime for reuse
-            local_dt = None
-            if obj.get("timestamp") is not None:
-                local_dt = obj["timestamp"].astimezone(santiago_tz)
+        return StreamingHttpResponse(
+            self._copy_stream(copy_sql, params, compress=False),
+            content_type="text/csv",
+            headers={
+                "Content-Disposition": 'attachment; filename="historic_speeds_local.csv"',
+            },
+        )
 
-            for field in fieldnames:
-                value = obj[field]
-                if local_dt is not None:
-                    if field == "timestamp":
-                        value = local_dt.strftime("%Y-%m-%dT%H:%M:%S")
-                    elif field == "temporal_segment":
-                        # Recalculate: (hour * 60 + minute) // 15
-                        value = (local_dt.hour * 60 + local_dt.minute) // 15
-                    elif field == "day_type":
-                        # Recalculate: L (Mon-Fri), S (Sat), D (Sun)
-                        weekday = local_dt.weekday()
-                        value = "L" if weekday < 5 else ("S" if weekday == 5 else "D")
-                # Join list fields with semicolon to avoid CSV delimiter conflicts
-                if isinstance(value, list):
-                    value = ";".join(str(v) for v in value) if value else ""
-                row.append(str(value))
-            yield ",".join(row) + "\n"
+    def to_csv_local_gz(self, request, *args, **kwargs):
+        where_sql, params = self._build_where_clause(request.query_params, alias="hs")
+
+        if len(request.query_params) == 0:
+            previous_month = get_previous_month()
+            if where_sql:
+                where_sql += " AND EXTRACT(MONTH FROM hs.timestamp) = %s"
+            else:
+                where_sql = "WHERE EXTRACT(MONTH FROM hs.timestamp) = %s"
+            params.append(previous_month)
+
+        copy_sql = f"""
+            COPY (
+                SELECT
+                    sg.shape_id AS shape,
+                    sg.sequence AS sequence,
+                    FLOOR(
+                        (
+                            EXTRACT(HOUR FROM (hs.timestamp AT TIME ZONE 'America/Santiago')) * 60
+                            + EXTRACT(MINUTE FROM (hs.timestamp AT TIME ZONE 'America/Santiago'))
+                        ) / 15
+                    )::int AS temporal_segment,
+                    CASE
+                        WHEN EXTRACT(ISODOW FROM (hs.timestamp AT TIME ZONE 'America/Santiago')) BETWEEN 1 AND 5 THEN 'L'
+                        WHEN EXTRACT(ISODOW FROM (hs.timestamp AT TIME ZONE 'America/Santiago')) = 6 THEN 'S'
+                        ELSE 'D'
+                    END AS day_type,
+                    hs.speed,
+                    (hs.timestamp AT TIME ZONE 'America/Santiago') AS timestamp
+                FROM rest_api_historicspeed hs
+                INNER JOIN rest_api_segment sg
+                    ON hs.segment_id = sg.segment_id
+                {where_sql}
+                ORDER BY sg.shape_id, sg.sequence, temporal_segment
+            ) TO STDOUT WITH CSV HEADER
+        """
+        return StreamingHttpResponse(
+            self._copy_stream(copy_sql, params, compress=True),
+            content_type="application/gzip",
+            headers={
+                "Content-Disposition": 'attachment; filename="historic_speeds_local.csv.gz"',
+            },
+        )
 
 
 class AlertViewSet(viewsets.ModelViewSet):
