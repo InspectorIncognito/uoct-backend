@@ -1,13 +1,14 @@
 import itertools
 import math
 import os
-from typing import Dict, List, Optional
+from typing import Dict, List, Optional, Tuple
 
 import geopandas as gpd
 import networkx as nx
+import numpy as np
 import pandas as pd
 from haversine import Unit, haversine
-from rest_api.models import Axles, Shape
+from rest_api.models import Axles, Shape, TrafficSignal
 from rest_api.util.shape import flush_shape_objects
 from shapely import Point
 from shapely.geometry import LineString as shp_LineString
@@ -17,6 +18,17 @@ from shapely.ops import linemerge, unary_union
 from processors.geometry.point import Point as p
 from processors.geometry.utils import interpolate_points_by_distance
 from processors.osm.query import INDEPENDENCIA_QUERY, VESPUCIO_QUERY, OSMDownloader
+
+# ============================================================================
+# Configuration for traffic signal-based segmentation
+# ============================================================================
+TRAFFIC_SIGNAL_CONFIG = {
+    "buffer_m": 10.0,  # Buffer in meters to detect intersection with ways
+    "min_major_ways": 2,  # Minimum number of major ways (motorway/primary/secondary/tertiary) at intersection
+    "fallback_distance_m": 500.0,  # Fallback max distance between cuts when no signals
+    "min_segment_length_m": 350.0,  # Minimum segment length (avoid very short segments)
+    "max_segment_length_m": 650.0,  # Maximum segment length (avoid very long segments)
+}
 
 
 def bearing_from_coords(a, b) -> float:
@@ -803,19 +815,766 @@ def segment_shape_by_distance(
     return gdf_segments
 
 
+# ============================================================================
+# Traffic Signal-Based Segmentation Functions
+# ============================================================================
+
+
+def extract_streets_and_signals(
+    osm_data: Dict,
+) -> Tuple[gpd.GeoDataFrame, gpd.GeoDataFrame]:
+    """
+    Extract streets and traffic signals from OSM response (streets + signals query).
+
+    Parameters
+    ----------
+    osm_data : Dict
+        GeoJSON response from Overpass API (streets with signals query).
+
+    Returns
+    -------
+    Tuple[gpd.GeoDataFrame, gpd.GeoDataFrame]
+        (streets_gdf, signals_gdf)
+        - streets_gdf: LineStrings of the target axis streets
+        - signals_gdf: Points of traffic signals on those streets (with 'id' column for OSM node ID)
+    """
+    features = osm_data.get("features", [])
+    if not features:
+        return (
+            gpd.GeoDataFrame(crs="EPSG:4326"),
+            gpd.GeoDataFrame(crs="EPSG:4326"),
+        )
+
+    streets = []
+    signals = []
+
+    for feature in features:
+        geom_type = feature.get("geometry", {}).get("type", "")
+        props = feature.get("properties", {})
+
+        if geom_type == "Point" and props.get("highway") == "traffic_signals":
+            # Preserve the feature ID (OSM node ID) in properties
+            # GeoJSON 'id' field is not captured by from_features(), so we copy it
+            feature_id = feature.get("id", "")
+            if feature_id:
+                # The ID format from Overpass is typically "node/123456789"
+                # Extract just the numeric part
+                if "/" in str(feature_id):
+                    feature_id = str(feature_id).split("/")[-1]
+                props["id"] = feature_id
+            signals.append(feature)
+        elif geom_type == "LineString" or geom_type == "MultiLineString":
+            streets.append(feature)
+
+    streets_gdf = (
+        gpd.GeoDataFrame.from_features(streets, crs="EPSG:4326")
+        if streets
+        else gpd.GeoDataFrame(crs="EPSG:4326")
+    )
+    signals_gdf = (
+        gpd.GeoDataFrame.from_features(signals, crs="EPSG:4326")
+        if signals
+        else gpd.GeoDataFrame(crs="EPSG:4326")
+    )
+
+    return streets_gdf, signals_gdf
+
+
+def extract_relevant_ways(osm_data: Dict) -> gpd.GeoDataFrame:
+    """
+    Extract relevant ways (primary/secondary/tertiary) from OSM response.
+
+    Parameters
+    ----------
+    osm_data : Dict
+        GeoJSON response from Overpass API (relevant ways query).
+
+    Returns
+    -------
+    gpd.GeoDataFrame
+        LineStrings of all primary/secondary/tertiary ways in the area.
+    """
+    features = osm_data.get("features", [])
+    if not features:
+        return gpd.GeoDataFrame(crs="EPSG:4326")
+
+    ways = []
+    for feature in features:
+        geom_type = feature.get("geometry", {}).get("type", "")
+        props = feature.get("properties", {})
+
+        if geom_type == "LineString" or geom_type == "MultiLineString":
+            highway_type = props.get("highway", "")
+            if highway_type in ("primary", "secondary", "tertiary"):
+                ways.append(feature)
+
+    return (
+        gpd.GeoDataFrame.from_features(ways, crs="EPSG:4326")
+        if ways
+        else gpd.GeoDataFrame(crs="EPSG:4326")
+    )
+
+
+def identify_relevant_traffic_signals(
+    signals_gdf: gpd.GeoDataFrame,
+    ways_gdf: gpd.GeoDataFrame,
+    buffer_m: float = None,
+    min_major_ways: int = None,
+) -> gpd.GeoDataFrame:
+    """
+    Identify traffic signals at relevant intersections.
+
+    A traffic signal is "relevant" if it's near an intersection with at least
+    `min_major_ways` major roads (primary, secondary, or tertiary).
+
+    Parameters
+    ----------
+    signals_gdf : gpd.GeoDataFrame
+        GeoDataFrame with traffic signal Points.
+    ways_gdf : gpd.GeoDataFrame
+        GeoDataFrame with all relevant ways (primary/secondary/tertiary).
+    buffer_m : float, optional
+        Buffer radius in meters for intersection detection.
+        Defaults to TRAFFIC_SIGNAL_CONFIG["buffer_m"].
+    min_major_ways : int, optional
+        Minimum number of major ways that must intersect at the signal location.
+        Defaults to TRAFFIC_SIGNAL_CONFIG["min_major_ways"].
+
+    Returns
+    -------
+    gpd.GeoDataFrame
+        Filtered GeoDataFrame with only relevant traffic signals.
+    """
+    if buffer_m is None:
+        buffer_m = TRAFFIC_SIGNAL_CONFIG["buffer_m"]
+    if min_major_ways is None:
+        min_major_ways = TRAFFIC_SIGNAL_CONFIG["min_major_ways"]
+
+    if signals_gdf.empty or ways_gdf.empty:
+        return signals_gdf
+
+    # Project to metric CRS for accurate buffer calculations
+    metric_crs = signals_gdf.estimate_utm_crs() or "EPSG:3857"
+    signals_metric = signals_gdf.to_crs(metric_crs)
+    ways_metric = ways_gdf.to_crs(metric_crs)
+
+    # Create spatial index for ways
+    ways_sindex = ways_metric.sindex
+
+    relevant_indices = []
+
+    for idx, signal in signals_metric.iterrows():
+        # Create buffer around the signal
+        signal_buffer = signal.geometry.buffer(buffer_m)
+
+        # Find ways that intersect this buffer
+        possible_matches_idx = list(ways_sindex.intersection(signal_buffer.bounds))
+        if not possible_matches_idx:
+            continue
+
+        # Count unique ways that actually intersect
+        intersecting_ways = ways_metric.iloc[possible_matches_idx]
+        actual_intersections = intersecting_ways[
+            intersecting_ways.geometry.intersects(signal_buffer)
+        ]
+
+        # Count by unique way IDs (if available) or by geometry
+        if "id" in actual_intersections.columns:
+            way_count = actual_intersections["id"].nunique()
+        else:
+            way_count = len(actual_intersections)
+
+        if way_count >= min_major_ways:
+            relevant_indices.append(idx)
+
+        # Add the name of the ways to the signal metadata for later use (e.g. naming segments)
+        if not actual_intersections.empty:
+            way_names = actual_intersections["name"].dropna().unique()
+            if len(way_names) > 0:
+                signals_gdf.at[idx, "intersecting_ways"] = ", ".join(way_names)
+
+    if not relevant_indices:
+        return gpd.GeoDataFrame(
+            {"geometry": []}, geometry="geometry", crs=signals_gdf.crs
+        )
+
+    return signals_gdf.loc[relevant_indices].copy()
+
+
+def project_point_onto_line(point: Point, line: shp_LineString) -> Tuple[float, Point]:
+    """
+    Project a point onto a line and return the distance along the line and projected point.
+
+    Parameters
+    ----------
+    point : Point
+        The point to project.
+    line : LineString
+        The line to project onto.
+
+    Returns
+    -------
+    Tuple[float, Point]
+        (distance_along_line, projected_point)
+    """
+    distance_along = line.project(point)
+    projected_point = line.interpolate(distance_along)
+    return distance_along, projected_point
+
+
+def get_cut_points_from_signals(
+    line: shp_LineString,
+    signals_gdf: gpd.GeoDataFrame,
+    buffer_m: float = None,
+    min_segment_length_m: float = None,
+    max_segment_length_m: float = None,
+) -> List[Tuple[float, Optional[str]]]:
+    """
+    Get sorted list of cut points along the line based on nearby traffic signals.
+
+    Parameters
+    ----------
+    line : LineString
+        The axis line geometry (in metric CRS).
+    signals_gdf : gpd.GeoDataFrame
+        GeoDataFrame with relevant traffic signals (in metric CRS).
+        Expected to have 'id' column with OSM node ID.
+    buffer_m : float, optional
+        Maximum distance from line to consider a signal.
+        Defaults to TRAFFIC_SIGNAL_CONFIG["buffer_m"].
+    min_segment_length_m : float, optional
+        Minimum distance between cut points.
+        Defaults to TRAFFIC_SIGNAL_CONFIG["min_segment_length_m"].
+
+    Returns
+    -------
+    List[Tuple[float, Optional[str]]]
+        Sorted list of (distance_along_line, osm_id) tuples.
+        osm_id is the OSM node ID of the traffic signal at that cut point.
+    """
+    if buffer_m is None:
+        buffer_m = TRAFFIC_SIGNAL_CONFIG["buffer_m"]
+    if min_segment_length_m is None:
+        min_segment_length_m = TRAFFIC_SIGNAL_CONFIG["min_segment_length_m"]
+    if max_segment_length_m is None:
+        max_segment_length_m = TRAFFIC_SIGNAL_CONFIG["max_segment_length_m"]
+
+    if signals_gdf.empty:
+        return []
+
+    # List of (distance, osm_id) tuples
+    cut_points = []
+    line_length = line.length
+
+    # Create buffer around the line to find nearby signals
+    line_buffer = line.buffer(buffer_m * 1.5)  # Slightly larger buffer for search
+
+    for idx, signal in signals_gdf.iterrows():
+        if not line_buffer.contains(signal.geometry):
+            # Quick filter: skip signals far from line
+            if signal.geometry.distance(line) > buffer_m * 2:
+                continue
+
+        # Project signal onto line
+        dist_along, projected = project_point_onto_line(signal.geometry, line)
+
+        # Check if projection is actually close to the signal
+        if projected.distance(signal.geometry) <= buffer_m:
+            # Avoid cuts at the very start or end
+            if min_segment_length_m < dist_along < (line_length - min_segment_length_m):
+                # Extract OSM ID - try 'id' column first, then '@id', then index
+                osm_id = None
+                if "id" in signals_gdf.columns and pd.notna(signal.get("id")):
+                    osm_id = str(signal["id"])
+                elif "@id" in signals_gdf.columns and pd.notna(signal.get("@id")):
+                    osm_id = str(signal["@id"])
+                else:
+                    # Use the DataFrame index as fallback
+                    osm_id = str(idx)
+                cut_points.append((dist_along, osm_id))
+
+    # Sort by distance
+    cut_points = sorted(cut_points, key=lambda x: x[0])
+
+    # Merge cuts that are too close together (keep the first one)
+    if len(cut_points) > 1:
+        merged_cuts = [cut_points[0]]
+        for cut in cut_points[1:]:
+            if cut[0] - merged_cuts[-1][0] >= min_segment_length_m:
+                merged_cuts.append(cut)
+        cut_points = merged_cuts
+
+    return cut_points
+
+
+def add_fallback_cuts(
+    cut_distances: List[float],
+    line_length: float,
+    fallback_distance_m: float = None,
+    min_segment_length_m: float = None,
+) -> List[float]:
+    """
+    Add fallback cut points when segments are too long (no signals in between).
+
+    Parameters
+    ----------
+    cut_distances : List[float]
+        Existing cut distances along the line.
+    line_length : float
+        Total length of the line in meters.
+    fallback_distance_m : float, optional
+        Maximum distance between cuts.
+        Defaults to TRAFFIC_SIGNAL_CONFIG["fallback_distance_m"].
+    min_segment_length_m : float, optional
+        Minimum segment length.
+        Defaults to TRAFFIC_SIGNAL_CONFIG["min_segment_length_m"].
+
+    Returns
+    -------
+    List[float]
+        Updated list of cut distances with fallback cuts added.
+    """
+    if fallback_distance_m is None:
+        fallback_distance_m = TRAFFIC_SIGNAL_CONFIG["fallback_distance_m"]
+    if min_segment_length_m is None:
+        min_segment_length_m = TRAFFIC_SIGNAL_CONFIG["min_segment_length_m"]
+
+    # Add virtual start and end points
+    all_points = [0.0] + cut_distances + [line_length]
+
+    new_cuts = list(cut_distances)
+
+    for i in range(len(all_points) - 1):
+        start = all_points[i]
+        end = all_points[i + 1]
+        segment_length = end - start
+
+        # If segment is too long, add intermediate cuts
+        if segment_length > fallback_distance_m:
+            num_new_cuts = int(segment_length / fallback_distance_m)
+            step = segment_length / (num_new_cuts + 1)
+
+            for j in range(1, num_new_cuts + 1):
+                new_cut = start + j * step
+                # Avoid placing cut too close to existing cuts
+                if all(abs(new_cut - c) >= min_segment_length_m for c in all_points):
+                    new_cuts.append(new_cut)
+
+    return sorted(set(new_cuts))
+
+
+def segment_shape_by_traffic_signals(
+    shape: gpd.GeoDataFrame,
+    signals_gdf: gpd.GeoDataFrame,
+    fallback_distance_m: float = None,
+    buffer_m: float = None,
+    min_segment_length_m: float = None,
+    max_segment_length_m: float = None,
+) -> gpd.GeoDataFrame:
+    """
+    Segment a shape by traffic signal locations with validation and fallback.
+
+    This function cuts the axis at relevant traffic signal locations. If a segment
+    would be shorter than min_segment_length_m or longer than max_segment_length_m,
+    it uses fallback_distance_m-based cuts instead.
+
+    Parameters
+    ----------
+    shape : gpd.GeoDataFrame
+        GeoDataFrame with a single LineString or MultiLineString geometry.
+    signals_gdf : gpd.GeoDataFrame
+        GeoDataFrame with relevant traffic signals (already filtered).
+        Expected to have 'id' column with OSM node ID.
+    fallback_distance_m : float, optional
+        Distance for fallback cuts when signal-based segments are invalid.
+        Defaults to TRAFFIC_SIGNAL_CONFIG["fallback_distance_m"].
+    buffer_m : float, optional
+        Buffer for projecting signals onto line.
+        Defaults to TRAFFIC_SIGNAL_CONFIG["buffer_m"].
+    min_segment_length_m : float, optional
+        Minimum valid segment length (default: 350m).
+        Defaults to TRAFFIC_SIGNAL_CONFIG["min_segment_length_m"].
+    max_segment_length_m : float, optional
+        Maximum valid segment length (default: 650m).
+        Defaults to TRAFFIC_SIGNAL_CONFIG["max_segment_length_m"].
+
+    Returns
+    -------
+    gpd.GeoDataFrame
+        Segmented GeoDataFrame with LineString geometries and columns:
+        - start_signal_osm_id: OSM ID of signal at segment start (or None)
+        - end_signal_osm_id: OSM ID of signal at segment end (or None)
+    """
+    if fallback_distance_m is None:
+        fallback_distance_m = TRAFFIC_SIGNAL_CONFIG["fallback_distance_m"]
+    if buffer_m is None:
+        buffer_m = TRAFFIC_SIGNAL_CONFIG["buffer_m"]
+    if min_segment_length_m is None:
+        min_segment_length_m = TRAFFIC_SIGNAL_CONFIG["min_segment_length_m"]
+    if max_segment_length_m is None:
+        max_segment_length_m = TRAFFIC_SIGNAL_CONFIG["max_segment_length_m"]
+
+    geom = shape.geometry.iloc[0]
+    if not isinstance(geom, (shp_LineString, shp_MultiLineString)):
+        raise ValueError("Input geometry must be a LineString or MultiLineString.")
+
+    # Convert MultiLineString to single LineString by extracting all coords
+    if isinstance(geom, shp_MultiLineString):
+        all_coords = []
+        for line in geom.geoms:
+            all_coords.extend(list(line.coords))
+        geom = shp_LineString(all_coords)
+
+    # Project to metric CRS
+    orig_crs = shape.crs or "EPSG:4326"
+    metric_crs = shape.estimate_utm_crs() or "EPSG:3857"
+
+    shape_metric = shape.to_crs(metric_crs)
+    geom_metric = shape_metric.geometry.iloc[0]
+
+    if isinstance(geom_metric, shp_MultiLineString):
+        all_coords = []
+        for line in geom_metric.geoms:
+            all_coords.extend(list(line.coords))
+        geom_metric = shp_LineString(all_coords)
+
+    # Convert signals to same CRS
+    if not signals_gdf.empty:
+        signals_metric = signals_gdf.to_crs(metric_crs)
+    else:
+        signals_metric = signals_gdf
+
+    line_length = geom_metric.length
+
+    # Get cut points from traffic signals: List[(distance, osm_id)]
+    signal_cut_points = get_cut_points_from_signals(
+        geom_metric, signals_metric, buffer_m, min_segment_length_m
+    )
+
+    print(f"  Found {len(signal_cut_points)} traffic signal cut points")
+    if signal_cut_points:
+        print(f"    First 5 cut points: {signal_cut_points[:5]}")
+
+    # Validate and process cut points with min/max segment length constraints
+    # Build final cut points with signal tracking
+    validated_cuts = _validate_and_build_cuts(
+        signal_cut_points,
+        line_length,
+        min_segment_length_m,
+        max_segment_length_m,
+        fallback_distance_m,
+    )
+
+    print(f"  Total validated cut points: {len(validated_cuts)}")
+    if validated_cuts:
+        signal_cuts = [c for c in validated_cuts if c[1] is not None]
+        print(f"    Cut points with signals: {len(signal_cuts)}")
+
+    # Build segments with signal metadata
+    # validated_cuts is List[(distance, osm_id_or_none)]
+    # We need to track start/end signal for each segment
+    output_data = _build_segments_with_signals(
+        geom_metric, validated_cuts, line_length, min_segment_length_m
+    )
+
+    if not output_data:
+        # Fallback: return entire line as single segment with no signals
+        output_data = [
+            {
+                "geometry": geom_metric,
+                "start_signal_osm_id": None,
+                "end_signal_osm_id": None,
+            }
+        ]
+
+    # Create GeoDataFrame in metric CRS
+    gdf_segments = gpd.GeoDataFrame(output_data, crs=metric_crs)
+
+    # Simplify (Douglas-Peucker)
+    gdf_segments["geometry"] = gdf_segments.simplify(
+        tolerance=4, preserve_topology=True
+    )
+
+    # Reproject back to original CRS
+    gdf_segments = gdf_segments.to_crs(orig_crs)
+
+    # Add per-segment bearing
+    gdf_segments["bearing"] = gdf_segments.geometry.apply(line_first_last_bearing)
+
+    # Add metadata from original shape
+    for col in shape.columns:
+        if col != "geometry" and col not in gdf_segments.columns:
+            gdf_segments[col] = shape.iloc[0][col]
+
+    return gdf_segments
+
+
+def _validate_and_build_cuts(
+    signal_cut_points: List[Tuple[float, Optional[str]]],
+    line_length: float,
+    min_segment_length_m: float,
+    max_segment_length_m: float,
+    fallback_distance_m: float,
+) -> List[Tuple[float, Optional[str]]]:
+    """
+    Validate signal-based cuts and add fallback cuts where needed.
+
+    Rules (per user requirement):
+    - If a segment between signals would be < min_segment_length_m OR > max_segment_length_m:
+      Use fallback_distance_m cuts instead (no signal association for that stretch).
+    - If segment is between min and max: Use the traffic signal cut.
+
+    Parameters
+    ----------
+    signal_cut_points : List[Tuple[float, Optional[str]]]
+        Raw cut points from signals: (distance, osm_id)
+    line_length : float
+        Total length of the line in meters.
+    min_segment_length_m : float
+        Minimum valid segment length (350m).
+    max_segment_length_m : float
+        Maximum valid segment length (650m).
+    fallback_distance_m : float
+        Distance for fallback cuts when segments are invalid (500m).
+
+    Returns
+    -------
+    List[Tuple[float, Optional[str]]]
+        Validated cut points with fallback cuts added where needed.
+    """
+    final_cuts = []
+    current_pos = 0.0
+    signal_idx = 0
+    signals_used = 0
+
+    while current_pos < line_length:
+        # Find the next signal after current_pos
+        next_signal_dist = None
+        next_signal_osm_id = None
+
+        while signal_idx < len(signal_cut_points):
+            sig_dist, sig_osm_id = signal_cut_points[signal_idx]
+            if sig_dist > current_pos:
+                next_signal_dist = sig_dist
+                next_signal_osm_id = sig_osm_id
+                break
+            signal_idx += 1
+
+        if next_signal_dist is None:
+            # No more signals - fill remaining distance with fallback cuts
+            remaining = line_length - current_pos
+            if remaining > max_segment_length_m:
+                fallback = _generate_distance_cuts(
+                    current_pos, line_length, fallback_distance_m
+                )
+                final_cuts.extend(fallback)
+            break
+
+        segment_length = next_signal_dist - current_pos
+
+        if segment_length < min_segment_length_m:
+            # Segment too short - skip this signal, try the next one
+            signal_idx += 1
+            continue
+
+        elif segment_length > max_segment_length_m:
+            # Segment too long - add fallback cuts up to (but not including) the signal
+            # Then check if we can use the signal for the next segment
+            fallback = _generate_distance_cuts(
+                current_pos, next_signal_dist, fallback_distance_m
+            )
+            final_cuts.extend(fallback)
+
+            # Move current_pos to the last fallback cut (or close to the signal)
+            if fallback:
+                current_pos = fallback[-1][0]
+            else:
+                current_pos = next_signal_dist
+
+            # Now check if we can use this signal
+            new_segment_length = next_signal_dist - current_pos
+            if min_segment_length_m <= new_segment_length <= max_segment_length_m:
+                # We can use this signal
+                final_cuts.append((next_signal_dist, next_signal_osm_id))
+                current_pos = next_signal_dist
+                signals_used += 1
+            # Either way, move to check next signal
+            signal_idx += 1
+
+        else:
+            # Segment length is valid (between min and max) - use the signal
+            final_cuts.append((next_signal_dist, next_signal_osm_id))
+            current_pos = next_signal_dist
+            signals_used += 1
+            signal_idx += 1
+
+    # Sort and deduplicate by distance
+    final_cuts = sorted(set(final_cuts), key=lambda x: x[0])
+
+    print(f"    Valid signal cuts used: {signals_used}")
+    print(f"    Final cuts (with fallbacks): {len(final_cuts)}")
+
+    return final_cuts
+
+
+def _generate_distance_cuts(
+    start_dist: float,
+    end_dist: float,
+    distance_m: float,
+) -> List[Tuple[float, Optional[str]]]:
+    """
+    Generate distance-based cut points between start and end.
+
+    These cuts have no signal association (osm_id = None).
+
+    Parameters
+    ----------
+    start_dist : float
+        Start distance along the line.
+    end_dist : float
+        End distance along the line.
+    distance_m : float
+        Target distance between cuts.
+
+    Returns
+    -------
+    List[Tuple[float, Optional[str]]]
+        List of (distance, None) tuples for fallback cuts.
+    """
+    cuts = []
+    segment_length = end_dist - start_dist
+
+    if segment_length <= distance_m:
+        return cuts
+
+    num_cuts = int(segment_length / distance_m)
+    step = segment_length / (num_cuts + 1)
+
+    for i in range(1, num_cuts + 1):
+        cut_dist = start_dist + i * step
+        cuts.append((cut_dist, None))
+
+    return cuts
+
+
+def _build_segments_with_signals(
+    line: shp_LineString,
+    validated_cuts: List[Tuple[float, Optional[str]]],
+    line_length: float,
+    min_segment_length_m: float,
+) -> List[Dict]:
+    """
+    Build segment geometries with signal metadata.
+
+    Parameters
+    ----------
+    line : LineString
+        The axis line geometry (in metric CRS).
+    validated_cuts : List[Tuple[float, Optional[str]]]
+        Validated cut points: (distance, osm_id_or_none)
+    line_length : float
+        Total length of the line.
+    min_segment_length_m : float
+        Minimum segment length for merging short final segments.
+
+    Returns
+    -------
+    List[Dict]
+        List of dicts with 'geometry', 'start_signal_osm_id', 'end_signal_osm_id'
+    """
+    # Build all cut points including start (0) and end (line_length)
+    all_points = [(0.0, None)] + validated_cuts + [(line_length, None)]
+
+    output_data = []
+
+    for i in range(len(all_points) - 1):
+        start_dist, start_osm_id = all_points[i]
+        end_dist, end_osm_id = all_points[i + 1]
+
+        if start_dist >= end_dist:
+            continue
+
+        # Extract substring from line via interpolation
+        num_points = max(int((end_dist - start_dist) / 10), 2)
+        distances = np.linspace(start_dist, end_dist, num_points)
+        coords = [line.interpolate(d).coords[0] for d in distances]
+
+        if len(coords) >= 2:
+            segment_line = shp_LineString(coords)
+            output_data.append(
+                {
+                    "geometry": segment_line,
+                    "start_signal_osm_id": start_osm_id,
+                    "end_signal_osm_id": end_osm_id,
+                }
+            )
+
+    # Merge very short last segment with previous
+    if len(output_data) >= 2:
+        last_seg = output_data[-1]
+        if last_seg["geometry"].length < 0.75 * min_segment_length_m:
+            prev_seg = output_data[-2]
+            merged_coords = (
+                list(prev_seg["geometry"].coords)
+                + list(last_seg["geometry"].coords)[1:]
+            )
+            output_data[-2]["geometry"] = shp_LineString(merged_coords)
+            # Keep the end_signal from the merged segment
+            output_data[-2]["end_signal_osm_id"] = last_seg["end_signal_osm_id"]
+            output_data.pop(-1)
+
+    return output_data
+
+
 def save_segmented_shape_to_db(
     segmented_shape: List[shp_LineString],
     shape_name: str,
     bearing: List[float] = None,
     direction: int = None,
+    start_signal_osm_ids: List[Optional[str]] = None,
+    end_signal_osm_ids: List[Optional[str]] = None,
+    signals_map: Dict[str, TrafficSignal] = None,
 ):
+    """
+    Save segmented shape to database.
+
+    Parameters
+    ----------
+    segmented_shape : List[shp_LineString]
+        List of LineString geometries for each segment.
+    shape_name : str
+        Name for the shape.
+    bearing : List[float], optional
+        List of bearings for each segment.
+    direction : int, optional
+        Direction indicator for all segments.
+    start_signal_osm_ids : List[Optional[str]], optional
+        List of OSM IDs for start signals (one per segment, can be None).
+    end_signal_osm_ids : List[Optional[str]], optional
+        List of OSM IDs for end signals (one per segment, can be None).
+    signals_map : Dict[str, TrafficSignal], optional
+        Mapping of osm_id -> TrafficSignal instance for FK lookup.
+    """
     shape = Shape.objects.create(**{"name": shape_name})
+
     for sequence, segment in enumerate(segmented_shape):
+        # Look up start/end signals from map
+        start_signal = None
+        end_signal = None
+
+        if signals_map:
+            if start_signal_osm_ids and start_signal_osm_ids[sequence]:
+                start_signal = signals_map.get(start_signal_osm_ids[sequence])
+            if end_signal_osm_ids and end_signal_osm_ids[sequence]:
+                end_signal = signals_map.get(end_signal_osm_ids[sequence])
+
         shape.add_segment(
             sequence=sequence,
             geometry=segment,
             bearing=bearing[sequence] if bearing else None,
             direction=direction,
+            start_signal=start_signal,
+            end_signal=end_signal,
         )
 
 
@@ -823,18 +1582,47 @@ def save_all_segmented_shapes_to_db(
     segmented_shapes: List[gpd.GeoDataFrame],
     flush: bool = True,
     shape_name: str = None,
+    signals_map: Dict[str, TrafficSignal] = None,
 ):
+    """
+    Save all segmented shapes to database.
+
+    Parameters
+    ----------
+    segmented_shapes : List[gpd.GeoDataFrame]
+        List of GeoDataFrames, each containing segments for one direction.
+    flush : bool
+        If True, delete all existing shapes before saving.
+    shape_name : str
+        Base name for shapes (direction index will be appended).
+    signals_map : Dict[str, TrafficSignal], optional
+        Mapping of osm_id -> TrafficSignal instance for FK lookup.
+    """
     if flush:
         flush_shape_objects()
+
     for idx, segmented_shape in enumerate(segmented_shapes):
         if shape_name is not None:
             shape_name_ = f"{shape_name}_{segmented_shape['direction_group'].iloc[0]}"
             direction = segmented_shape["direction_group"].iloc[0]
+
+        # Extract signal OSM IDs from GeoDataFrame columns if present
+        start_signal_osm_ids = None
+        end_signal_osm_ids = None
+
+        if "start_signal_osm_id" in segmented_shape.columns:
+            start_signal_osm_ids = segmented_shape["start_signal_osm_id"].tolist()
+        if "end_signal_osm_id" in segmented_shape.columns:
+            end_signal_osm_ids = segmented_shape["end_signal_osm_id"].tolist()
+
         save_segmented_shape_to_db(
             segmented_shape.geometry.tolist(),
             shape_name=shape_name_,
             bearing=segmented_shape.bearing.tolist(),
             direction=direction,
+            start_signal_osm_ids=start_signal_osm_ids,
+            end_signal_osm_ids=end_signal_osm_ids,
+            signals_map=signals_map,
         )
 
 
@@ -887,9 +1675,24 @@ def normalize_geometry_by_bearing(
     return gdf
 
 
-def process_osm_queries(distance_threshold: float = 500.0, use_fixtures: bool = False):
+def process_osm_queries(
+    distance_threshold: float = 500.0,
+    use_fixtures: bool = False,
+    use_traffic_signals: bool = True,
+):
     """Process all the queries in EJES_PRINCIPALES, downloading data from OSM Overpass API,
-    or using local fixtures if use_fixtures is True. Segments the shapes by distance_threshold
+    or using local fixtures if use_fixtures is True.
+
+    Parameters
+    ----------
+    distance_threshold : float
+        Distance in meters to segment shapes (default: 500.0).
+        When use_traffic_signals=True, this is used as fallback_distance.
+    use_fixtures : bool
+        If True, use local fixtures instead of downloading from OSM.
+    use_traffic_signals : bool
+        If True, segment by traffic signals with fallback to distance_threshold.
+        If False, use traditional fixed-distance segmentation.
     """
     osm_downloader = OSMDownloader()
     axles_qs = Axles.objects.all().order_by("id")
@@ -897,29 +1700,69 @@ def process_osm_queries(distance_threshold: float = 500.0, use_fixtures: bool = 
         print("No Axles found in database. Run: python manage.py seed_axles")
         return
 
+    # Flush traffic signals at the start if using traffic signal mode
+    # This ensures we start fresh before any axis saves its signals
+    if use_traffic_signals:
+        from rest_api.util.traffic_signals import flush_traffic_signals_from_db
+
+        flush_traffic_signals_from_db()
+        print("Flushed existing traffic signals from DB")
+
+    # Download relevant ways once for the entire area (if using traffic signals)
+    relevant_ways_gdf = None
+    if use_traffic_signals:
+        # Get the first axis city to download relevant ways (assumes all axes share same city)
+        first_axle = axles_qs.first()
+        if first_axle:
+            print("=" * 50)
+            print(f"Downloading relevant ways for area: {first_axle.city}...")
+            try:
+                ways_query = osm_downloader.build_relevant_ways_query(first_axle.city)
+                ways_data = osm_downloader.execute_query(ways_query)
+                relevant_ways_gdf = extract_relevant_ways(ways_data)
+                print(
+                    f"  Downloaded {len(relevant_ways_gdf)} relevant ways (motorway/primary/secondary/tertiary)"
+                )
+            except Exception as e:
+                print(f"  Warning: Could not download relevant ways: {e}")
+                print("  Will fall back to distance-based segmentation")
+
     for idx, axle in enumerate(axles_qs):
         axis_config = {"city": axle.city, "streets": axle.streets}
         try:
             if axle.name == "Eje Américo Vespucio":
                 query = VESPUCIO_QUERY
-            # elif axle.name == "Eje Américo Vespucio Sur":
-            #     query = VESPUCIO_SUR_OVERPASS_QUERY
-            # elif axle.name == "Eje Américo Vespucio Oriente":
-            #     query = VESPUCIO_ORIENTE_OVERPASS_QUERY
+                # Vespucio uses special query, can't use traffic signals template
+                use_signals_for_axis = False
             elif axle.name == "Eje Independencia":
                 query = INDEPENDENCIA_QUERY
+                # Independencia uses special query, can't use traffic signals template
+                use_signals_for_axis = False
             else:
+                # Use streets+signals template when traffic signals mode is enabled
                 query = osm_downloader.build_overpass_query(
                     place=axis_config["city"],
                     streets=axis_config["streets"],
+                    include_traffic_signals=use_traffic_signals,
                 )
+                use_signals_for_axis = (
+                    use_traffic_signals and relevant_ways_gdf is not None
+                )
+
             axis = osm_downloader.execute_query(query)
         except Exception as e:
             print(f"Error downloading axis '{axle.name}': {e}")
             continue
 
         flush = idx == 0
-        process_shape_data(axle.name, axis, distance_threshold, flush=flush)
+        process_shape_data(
+            axle.name,
+            axis,
+            distance_threshold,
+            flush=flush,
+            use_traffic_signals=use_signals_for_axis,
+            relevant_ways_gdf=relevant_ways_gdf,
+        )
 
 
 def process_shape_data(
@@ -927,13 +1770,39 @@ def process_shape_data(
     axis: Dict,
     distance_threshold: float = 500.0,
     flush: bool = True,
+    use_traffic_signals: bool = False,
+    relevant_ways_gdf: gpd.GeoDataFrame = None,
 ):
     """
-    Creates the query, separates shapes, merges them and divides into segments of 'distance_threshold' meters.
+    Creates the query, separates shapes, merges them and divides into segments.
+    When use_traffic_signals=True, segments are delimited by traffic signals at
+    relevant intersections, with fallback to distance_threshold for long gaps.
     Stores all information in the db.
+
+    Parameters
+    ----------
+    axis_name : str
+        Name of the axis being processed.
+    axis : Dict
+        GeoJSON response from Overpass API (streets + signals query).
+    distance_threshold : float
+        Distance in meters for segmentation (default: 500.0).
+        Used as fallback when use_traffic_signals=True.
+    flush : bool
+        If True, flush existing shape objects before saving.
+    use_traffic_signals : bool
+        If True, segment by traffic signals with fallback to distance_threshold.
+        If False, use traditional fixed-distance segmentation.
+    relevant_ways_gdf : gpd.GeoDataFrame, optional
+        Pre-downloaded GeoDataFrame with relevant ways (primary/secondary/tertiary).
+        Required when use_traffic_signals=True.
     """
     print("=" * 50)
     print(f"\nProcessing axis: {axis_name} with {len(axis['features'])} features...")
+    if use_traffic_signals:
+        print("  Mode: Traffic signal-based segmentation")
+    else:
+        print(f"  Mode: Fixed distance segmentation ({distance_threshold}m)")
 
     # Validate that we have features to process
     if not axis.get("features") or len(axis["features"]) == 0:
@@ -942,8 +1811,55 @@ def process_shape_data(
             "Please verify that the streets configuration is correct and matches existing OSM data."
         )
 
-    # Extract features with valid geometry
+    # Extract traffic signals if using traffic signal mode
+    relevant_signals = gpd.GeoDataFrame(
+        {"geometry": []}, geometry="geometry", crs="EPSG:4326"
+    )
+    signals_map = {}  # osm_id -> TrafficSignal mapping
+
+    if use_traffic_signals:
+        if relevant_ways_gdf is None or relevant_ways_gdf.empty:
+            print(
+                "  Warning: No relevant ways provided, falling back to distance-based segmentation"
+            )
+            use_traffic_signals = False
+        else:
+            streets_gdf, signals_gdf = extract_streets_and_signals(axis)
+            print(
+                f"  Extracted: {len(streets_gdf)} street segments, {len(signals_gdf)} traffic signals"
+            )
+            if not signals_gdf.empty:
+                print(f"  Signal columns: {list(signals_gdf.columns)}")
+            print(f"  Using {len(relevant_ways_gdf)} pre-downloaded relevant ways")
+
+            if not signals_gdf.empty:
+                relevant_signals = identify_relevant_traffic_signals(
+                    signals_gdf, relevant_ways_gdf
+                )
+                print(
+                    f"  Identified {len(relevant_signals)} relevant traffic signals at major intersections"
+                )
+
+                # Save relevant traffic signals to DB BEFORE processing segments
+                if not relevant_signals.empty:
+                    from rest_api.util.traffic_signals import (
+                        save_relevant_traffic_signals,
+                    )
+
+                    print(f"  Saving {len(relevant_signals)} traffic signals to DB...")
+                    signals_map = save_relevant_traffic_signals(relevant_signals)
+                    print(f"  Saved {len(signals_map)} traffic signals to DB")
+            else:
+                print(
+                    "  Warning: No traffic signals found, falling back to distance-based segmentation"
+                )
+
+    # Extract features with valid geometry (only LineStrings for the axis)
     query_data = gpd.GeoDataFrame.from_features(axis, crs="EPSG:4326")
+
+    # Filter to only keep LineString geometries (exclude Points which are traffic signals)
+    query_data = query_data[query_data.geometry.type == "LineString"].copy()
+
     # STEP 1: Calculate original bearings
     query_data["original_bearing"] = query_data.geometry.apply(calculate_bearing)
 
@@ -1039,9 +1955,18 @@ def process_shape_data(
         )
         print("=" * 50)
 
-        segmented = segment_shape_by_distance(
-            filtered_gdf, distance_threshold, distance_algorithm="haversine"
-        )
+        # STEP 5: Segment - use traffic signals or distance-based
+        if use_traffic_signals and not relevant_signals.empty:
+            print(f"  Segmenting direction group {i} by traffic signals...")
+            segmented = segment_shape_by_traffic_signals(
+                filtered_gdf,
+                relevant_signals,
+                fallback_distance_m=distance_threshold,
+            )
+        else:
+            segmented = segment_shape_by_distance(
+                filtered_gdf, distance_threshold, distance_algorithm="haversine"
+            )
 
         segmented["target_bearing"] = target_bearing
 
@@ -1053,12 +1978,15 @@ def process_shape_data(
         )
         segmented_shapes.append(segmented)
     print("Saving all segmented shapes to DB...")
-    save_all_segmented_shapes_to_db(segmented_shapes, flush=flush, shape_name=axis_name)
+    save_all_segmented_shapes_to_db(
+        segmented_shapes, flush=flush, shape_name=axis_name, signals_map=signals_map
+    )
 
 
 def process_single_axis(
     axis_name: str,
     distance_threshold: float = 500.0,
+    use_traffic_signals: bool = True,
 ):
     """
     Process a single axis without deleting existing data.
@@ -1069,7 +1997,11 @@ def process_single_axis(
     axis_name : str
         Name of the axis to process (must exist in Axles table)
     distance_threshold : float
-        Distance in meters to segment shapes (default: 500.0)
+        Distance in meters to segment shapes (default: 500.0).
+        When use_traffic_signals=True, this is used as fallback_distance.
+    use_traffic_signals : bool
+        If True, segment by traffic signals with fallback to distance_threshold.
+        If False, use traditional fixed-distance segmentation.
     """
     osm_downloader = OSMDownloader()
 
@@ -1089,7 +2021,30 @@ def process_single_axis(
             shape.segment_set.all().delete()
         existing_shapes.delete()
 
-    # Download OSM data
+    # Download relevant ways if using traffic signals
+    relevant_ways_gdf = None
+    use_signals_for_axis = False
+
+    if use_traffic_signals:
+        # Check if this is a special axis that can't use traffic signals
+        if axis_name in ("Eje Américo Vespucio", "Eje Independencia"):
+            print(
+                f"  Note: {axis_name} uses special query, traffic signals mode disabled"
+            )
+        else:
+            print(f"Downloading relevant ways for area: {axis_config['city']}...")
+            try:
+                ways_query = osm_downloader.build_relevant_ways_query(
+                    axis_config["city"]
+                )
+                ways_data = osm_downloader.execute_query(ways_query)
+                relevant_ways_gdf = extract_relevant_ways(ways_data)
+                print(f"  Downloaded {len(relevant_ways_gdf)} relevant ways")
+                use_signals_for_axis = True
+            except Exception as e:
+                print(f"  Warning: Could not download relevant ways: {e}")
+
+    # Download OSM data for the axis
     try:
         if axis_name == "Eje Américo Vespucio":
             query = VESPUCIO_QUERY
@@ -1099,10 +2054,19 @@ def process_single_axis(
             query = osm_downloader.build_overpass_query(
                 place=axis_config["city"],
                 streets=axis_config["streets"],
+                include_traffic_signals=use_signals_for_axis,
             )
+
         axis = osm_downloader.execute_query(query)
     except Exception as e:
         raise Exception(f"Error downloading axis '{axis_name}': {e}")
 
     # Process the axis (flush=False to keep other data)
-    process_shape_data(axis_name, axis, distance_threshold, flush=False)
+    process_shape_data(
+        axis_name,
+        axis,
+        distance_threshold,
+        flush=False,
+        use_traffic_signals=use_signals_for_axis,
+        relevant_ways_gdf=relevant_ways_gdf,
+    )

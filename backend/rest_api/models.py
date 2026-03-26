@@ -52,6 +52,8 @@ class Shape(models.Model):
         geometry: shp_LineString,
         bearing: float = None,
         direction: int = None,
+        start_signal=None,
+        end_signal=None,
     ) -> None:
         points = list(geometry.coords)
         shape_data = {
@@ -60,6 +62,8 @@ class Shape(models.Model):
             "geometry": points,
             "bearing": bearing,
             "direction": direction,
+            "start_signal": start_signal,
+            "end_signal": end_signal,
         }
         for point in points:
             self.grid_min_lat = min(self.grid_min_lat, point[1])
@@ -116,6 +120,20 @@ class Segment(models.Model):
     direction = models.IntegerField(null=True, blank=True)
     sequence = models.IntegerField(blank=False, null=False)
     geometry = ArrayField(ArrayField(models.FloatField()), blank=False, null=False)
+    start_signal = models.ForeignKey(
+        "TrafficSignal",
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="segments_starting_here",
+    )
+    end_signal = models.ForeignKey(
+        "TrafficSignal",
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="segments_ending_here",
+    )
 
     def __str__(self):
         return f"Segment {self.sequence} of Shape {self.shape}"
@@ -399,10 +417,13 @@ class Axles(models.Model):
 
 
 class TrafficSignal(models.Model):
-    signal_id = models.CharField(max_length=128)
-    segment_id = models.ForeignKey(Segment, on_delete=models.CASCADE)
+    signal_id = models.CharField(max_length=128)  # Internal ID
+    osm_id = models.CharField(max_length=64, unique=True)  # OSM node ID
     latitude = models.FloatField()
     longitude = models.FloatField()
+    intersecting_ways = models.TextField(
+        blank=True, default=""
+    )  # Comma-separated way names
 
 
 class Camera(models.Model):

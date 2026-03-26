@@ -8,13 +8,47 @@ from django.core.cache import cache
 from jinja2 import Template
 from rest_api.models import Axles
 
-# Overpass API template for querying OSM data
+# Overpass API template for querying OSM data (basic - streets only)
 OVERPASS_TEMPLATE = Template(
     """rel({{ relation_id }});
 map_to_area->.target_area;
 way(area.target_area)
   [highway~"^(primary|secondary)$"]
   [name~"^({% for street in streets %}{{ street }}{% if not loop.last %}|{% endif %}{% endfor %})$"];
+"""
+)
+
+# Template for streets + traffic signals on those streets
+OVERPASS_STREETS_WITH_SIGNALS_TEMPLATE = Template(
+    """rel({{ relation_id }});
+map_to_area->.target_area;
+
+(
+  // Ejes de interés
+  way(area.target_area)
+    [highway~"^(primary|secondary)$"]
+    [name~"^({% for street in streets %}{{ street }}{% if not loop.last %}|{% endif %}{% endfor %})$"]
+    ->.streets;
+
+  // Semáforos sobre los ejes
+  node(w.streets)
+    [highway=traffic_signals];
+);
+
+out geom;
+"""
+)
+
+# Template for relevant ways in an area (primary/secondary/tertiary)
+# This should be downloaded once per relation_id
+OVERPASS_RELEVANT_WAYS_TEMPLATE = Template(
+    """rel({{ relation_id }});
+map_to_area->.target_area;
+
+way(area.target_area)
+  [highway~"^(motorway|primary|secondary|tertiary)$"];
+
+out geom;
 """
 )
 
@@ -232,7 +266,9 @@ class OSMDownloader:
         except requests.RequestException as e:
             raise Exception(f"Error connecting to Nominatim API: {e}")
 
-    def build_overpass_query(self, place: str, streets: List[str]) -> str:
+    def build_overpass_query(
+        self, place: str, streets: List[str], include_traffic_signals: bool = False
+    ) -> str:
         """Build an Overpass API query for a specific city, highway type, and list of streets.
 
         Parameters
@@ -241,6 +277,8 @@ class OSMDownloader:
             The name of the place to search in.
         streets : List[str]
             The names of the streets to include in the query.
+        include_traffic_signals : bool, optional
+            If True, includes traffic signals on the streets. Default is False.
 
         Returns
         -------
@@ -256,10 +294,37 @@ class OSMDownloader:
         try:
             relation_id = self.get_relation_id(place)
 
+            if include_traffic_signals:
+                return OVERPASS_STREETS_WITH_SIGNALS_TEMPLATE.render(
+                    relation_id=relation_id, streets=streets
+                )
             return OVERPASS_TEMPLATE.render(relation_id=relation_id, streets=streets)
 
         except Exception as e:
             print(f"Error building query: {e}")
+            raise
+
+    def build_relevant_ways_query(self, place: str) -> str:
+        """Build an Overpass API query for all relevant ways (primary/secondary/tertiary) in an area.
+
+        This query should be executed once per relation_id and cached/reused
+        for all axes in the same area.
+
+        Parameters
+        ----------
+        place : str
+            The name of the place to search in.
+
+        Returns
+        -------
+        str
+            The Overpass API query as a string.
+        """
+        try:
+            relation_id = self.get_relation_id(place)
+            return OVERPASS_RELEVANT_WAYS_TEMPLATE.render(relation_id=relation_id)
+        except Exception as e:
+            print(f"Error building relevant ways query: {e}")
             raise
 
     def execute_query(self, query: str, retries: int = 5) -> Dict:

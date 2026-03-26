@@ -857,6 +857,34 @@ class TrafficSignalViewSet(viewsets.ModelViewSet):
     serializer_class = TrafficSignalSerializer
     queryset = TrafficSignal.objects.all()
 
+    def to_geojson(self, request, *args, **kwargs):
+        """Return traffic signals used for segmentation as a GeoJSON FeatureCollection.
+
+        Only includes signals that are referenced as start_signal or end_signal
+        in at least one Segment.
+        """
+        from django.db.models import Q
+
+        # Filter only signals used for segmentation
+        signals = TrafficSignal.objects.filter(
+            Q(segments_starting_here__isnull=False)
+            | Q(segments_ending_here__isnull=False)
+        ).distinct()
+
+        features = []
+        for signal in signals:
+            features.append(
+                Feature(
+                    geometry=Point(coordinates=[signal.longitude, signal.latitude]),
+                    properties={
+                        "id": signal.id,
+                        "osm_id": signal.osm_id,
+                        "intersecting_ways": signal.intersecting_ways,
+                    },
+                )
+            )
+        return JsonResponse(FeatureCollection(features), safe=False)
+
 
 class CameraViewSet(viewsets.ModelViewSet):
     permission_classes = [AllowAny]

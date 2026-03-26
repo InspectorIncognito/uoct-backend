@@ -115,9 +115,11 @@ class ShapeManager:
 def flush_shape_objects():
     """Safely clear all shape-related data in dependency order to avoid FK type issues.
 
-    Deletes dependent records first (Speed, HistoricSpeed, Alert, Services, Stop,
-    TrafficSignal), then Segments, and finally Shapes. This avoids DB errors when
-    FK column types differ (e.g., bigint vs uuid) during ON DELETE CASCADE.
+    Deletes dependent records first (Speed, HistoricSpeed, Alert, Services, Stop),
+    then Segments, and finally Shapes. TrafficSignal is NOT deleted here because
+    signals are saved per-axis before segments and should persist across rebuilds.
+
+    Use flush_traffic_signals() separately if you need to clear signals.
     """
     try:
         # Delete dependents referencing Segment first
@@ -126,13 +128,13 @@ def flush_shape_objects():
         Alert.objects.all().delete()
         Services.objects.all().delete()
         Stop.objects.all().delete()
-        TrafficSignal.objects.all().delete()
+        # Note: TrafficSignal is NOT deleted here - it's managed separately
 
         # Then delete segments and shapes
         Segment.objects.all().delete()
         Shape.objects.all().delete()
         print(
-            "Flushed shapes and related objects (segments, speeds, alerts, services, stops, signals)"
+            "Flushed shapes and related objects (segments, speeds, alerts, services, stops)"
         )
     except Exception as e:
         print(f"Error flushing shape-related objects: {e}")

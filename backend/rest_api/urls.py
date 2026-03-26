@@ -96,6 +96,11 @@ urlpatterns = [
         TrafficSignalViewSet.as_view({"get": "list"}),
         name="traffic_signal",
     ),
+    path(
+        "traffic_signal/geojson/",
+        TrafficSignalViewSet.as_view({"get": "to_geojson"}),
+        name="traffic_signal_geojson",
+    ),
     path("camera/", CameraViewSet.as_view({"get": "list"}), name="camera"),
     path("axles/process/", ProcessAxisView.as_view(), name="process-axis"),
 ] + router.urls
