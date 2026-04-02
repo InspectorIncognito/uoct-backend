@@ -1,0 +1,48 @@
+[package]
+name = "map_matching"
+version = "0.1.0"
+edition = "2021"
+description = "High-performance HMM map matching for GPS trajectories"
+license = "MIT"
+
+[lib]
+name = "map_matching"
+crate-type = ["cdylib"]
+
+[dependencies]
+# Python bindings
+pyo3 = { version = "0.20", features = ["extension-module"] }
+numpy = "0.20"
+
+# Spatial indexing - fast KDTree implementation
+kiddo = "4.2"
+
+# Memory optimization
+smallvec = { version = "1.11", features = ["union"] }
+
+# Hash maps optimized for integer keys
+rustc-hash = "1.1"
+
+# Ordered floats for hash map keys
+ordered-float = "4.2"
+
+# Error handling
+thiserror = "1.0"
+
+[dev-dependencies]
+criterion = "0.5"
+approx = "0.5"
+
+[profile.release]
+lto = "fat"
+codegen-units = 1
+panic = "abort"
+opt-level = 3
+strip = true
+
+[profile.release.build-override]
+opt-level = 3
+
+[[bench]]
+name = "viterbi_bench"
+harness = false

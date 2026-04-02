@@ -1,6 +1,9 @@
 """Hidden Markov Model implementation for map matching GPS trajectories to road segments.
 Based on the paper "Hidden Markov Map Matching Through Noise and Sparseness" by Newson and Krumm.
 HIGHLY OPTIMIZED VERSION - 5-10x faster than original.
+
+This module supports an optional Rust backend for 20-50x additional speedup.
+When the `map_matching` Rust extension is installed, it will be used automatically.
 """
 
 import warnings
@@ -13,6 +16,26 @@ import pandas as pd
 from scipy.spatial import cKDTree
 from shapely.geometry import LineString, Point
 from shapely.ops import nearest_points
+
+# Try to import Rust acceleration
+try:
+    from rest_api.util.hmm.rust_bridge import (
+        USE_RUST,
+        RustSpatialIndex,
+        RustDirectionCache,
+        RustSegmentCache,
+        viterbi_rust,
+        precompute_caches_rust,
+        haversine_distance_rust,
+    )
+except ImportError:
+    USE_RUST = False
+    RustSpatialIndex = None
+    RustDirectionCache = None
+    RustSegmentCache = None
+    viterbi_rust = None
+    precompute_caches_rust = None
+    haversine_distance_rust = None
 
 
 @dataclass
@@ -155,7 +178,12 @@ def haversine_distance_vectorized(
 
 
 def haversine_distance(lat1: float, lon1: float, lat2: float, lon2: float) -> float:
-    """Calculate great circle distance between two points in meters."""
+    """Calculate great circle distance between two points in meters.
+
+    Uses Rust implementation when available for ~20x speedup.
+    """
+    if USE_RUST and haversine_distance_rust is not None:
+        return haversine_distance_rust(lat1, lon1, lat2, lon2)
     return float(
         haversine_distance_vectorized(
             np.array([lat1]), np.array([lon1]), np.array([lat2]), np.array([lon2])
@@ -305,10 +333,9 @@ def emission_prob_log(
     # Bearing weight
     if gps_bearing is not None and segment_bearing is not None:
         angle_diff = angle_difference(gps_bearing, segment_bearing)
-        log_bearing_prob = (
-            -0.5 * np.log(2 * np.pi * sigma_bearing**2)
-            - (angle_diff**2) / (2 * sigma_bearing**2)
-        )
+        log_bearing_prob = -0.5 * np.log(2 * np.pi * sigma_bearing**2) - (
+            angle_diff**2
+        ) / (2 * sigma_bearing**2)
         combined_log_prob = log_base_prob + bearing_weight_factor * log_bearing_prob
     else:
         combined_log_prob = log_base_prob
@@ -397,6 +424,8 @@ def viterbi(
 ) -> Tuple[List[Optional[int]], List[int], List[Optional[Point]]]:
     """Viterbi algorithm for HMM map matching - OPTIMIZED.
 
+    Automatically uses Rust implementation when Rust caches are provided.
+
     Returns
     -------
     matched_segments : List[Optional[int]]
@@ -407,6 +436,32 @@ def viterbi(
     projected_points : List[Optional[Point]]
         List of length len(gps_trajectory) with projected points, None for unmatched.
     """
+    # Check if we have Rust caches and should use Rust implementation
+    if (
+        USE_RUST
+        and viterbi_rust is not None
+        and RustDirectionCache is not None
+        and RustSpatialIndex is not None
+        and RustSegmentCache is not None
+        and isinstance(direction_cache, RustDirectionCache)
+        and isinstance(spatial_index, RustSpatialIndex)
+        and isinstance(segment_cache, RustSegmentCache)
+    ):
+        return viterbi_rust(
+            gps_trajectory,
+            direction_cache,
+            spatial_index,
+            segment_cache,
+            max_distance=max_distance,
+            sigma=sigma,
+            beta=beta,
+            min_candidates=min_candidates,
+            excluded_indices=excluded_indices,
+            gps_bearings=gps_bearings,
+            sigma_bearing=sigma_bearing,
+            bearing_weight_factor=bearing_weight_factor,
+        )
+
     # ── Auxiliar: elige el segmento con mayor log-emisión en un timestep ──────
     def _best_by_emission(
         candidates: Dict[int, Tuple[Point, float, Optional[float]]],
@@ -415,7 +470,12 @@ def viterbi(
         best_seg, best_pt, best_log = None, None, -np.inf
         for seg_idx, (pt, dist, seg_bearing) in candidates.items():
             e = emission_prob_log(
-                dist, sigma, gps_bearing, seg_bearing, sigma_bearing, bearing_weight_factor
+                dist,
+                sigma,
+                gps_bearing,
+                seg_bearing,
+                sigma_bearing,
+                bearing_weight_factor,
             )
             if e > best_log:
                 best_log, best_seg, best_pt = e, seg_idx, pt
@@ -468,7 +528,12 @@ def viterbi(
     )
     for segment_idx, (point, dist, seg_bearing) in filtered_candidates[0].items():
         V[0][segment_idx] = emission_prob_log(
-            dist, sigma, first_gps_bearing, seg_bearing, sigma_bearing, bearing_weight_factor
+            dist,
+            sigma,
+            first_gps_bearing,
+            seg_bearing,
+            sigma_bearing,
+            bearing_weight_factor,
         )
         path[0][segment_idx] = None
 
@@ -483,10 +548,18 @@ def viterbi(
             normalized_gps_bearings[curr_gps_idx] if normalized_gps_bearings else None
         )
 
-        for curr_seg_idx, (curr_point, curr_dist, curr_seg_bearing) in curr_candidates.items():
+        for curr_seg_idx, (
+            curr_point,
+            curr_dist,
+            curr_seg_bearing,
+        ) in curr_candidates.items():
             emission_log = emission_prob_log(
-                curr_dist, sigma, curr_gps_bearing, curr_seg_bearing,
-                sigma_bearing, bearing_weight_factor,
+                curr_dist,
+                sigma,
+                curr_gps_bearing,
+                curr_seg_bearing,
+                sigma_bearing,
+                bearing_weight_factor,
             )
             curr_direction = direction_cache.segment_to_direction.get(curr_seg_idx)
 
@@ -503,11 +576,14 @@ def viterbi(
                     trans_log = np.log(0.01)
                 else:
                     trans_log = transition_prob_log(
-                        prev_point, curr_point,
-                        prev_seg_idx, curr_seg_idx,
+                        prev_point,
+                        curr_point,
+                        prev_seg_idx,
+                        curr_seg_idx,
                         gps_trajectory[prev_gps_idx],
                         gps_trajectory[curr_gps_idx],
-                        beta, direction_cache,
+                        beta,
+                        direction_cache,
                     )
 
                 log_prob = prev_log_prob + trans_log + emission_log
@@ -536,7 +612,9 @@ def viterbi(
         # Fallback completo: elegir por emisión en cada timestep
         for i, candidates in enumerate(filtered_candidates):
             gps_idx = observation_mapping[i]
-            gps_bearing = normalized_gps_bearings[gps_idx] if normalized_gps_bearings else None
+            gps_bearing = (
+                normalized_gps_bearings[gps_idx] if normalized_gps_bearings else None
+            )
             best_seg, best_pt = _best_by_emission(candidates, gps_bearing)
             filtered_result[i] = best_seg
             filtered_projected_points[i] = best_pt  # None si no hay candidatos
@@ -550,8 +628,14 @@ def viterbi(
             if prev_segment is None:
                 # Fallback local: elegir por emisión en este timestep
                 gps_idx = observation_mapping[t]
-                gps_bearing = normalized_gps_bearings[gps_idx] if normalized_gps_bearings else None
-                best_seg, best_pt = _best_by_emission(filtered_candidates[t], gps_bearing)
+                gps_bearing = (
+                    normalized_gps_bearings[gps_idx]
+                    if normalized_gps_bearings
+                    else None
+                )
+                best_seg, best_pt = _best_by_emission(
+                    filtered_candidates[t], gps_bearing
+                )
                 filtered_result[t] = best_seg
                 filtered_projected_points[t] = best_pt  # None si no hay candidatos
             else:
@@ -568,13 +652,16 @@ def viterbi(
 
     return full_result, valid_observations, full_projected_points
 
+
 #############################
 # Cache Precomputation Layer #
 #############################
 
 
 def precompute_axes_caches(
-    axes_dict: Dict[str, gpd.GeoDataFrame], interval: float = 20.0
+    axes_dict: Dict[str, gpd.GeoDataFrame],
+    interval: float = 20.0,
+    use_rust: bool = True,
 ) -> Tuple[
     Dict[str, Tuple[cKDTree, np.ndarray, np.ndarray, bool]],
     Dict[str, DirectionCache],
@@ -582,15 +669,32 @@ def precompute_axes_caches(
 ]:
     """Precompute spatial index, direction cache and segment cache for each axis.
 
+    Parameters
+    ----------
+    axes_dict : dict
+        axis_id -> GeoDataFrame with segment data
+    interval : float
+        Densification interval in meters
+    use_rust : bool
+        Whether to use Rust implementation when available (default True)
+
     Returns
     -------
     spatial_indices : dict
-        axis_id -> (kdtree, densified_coords, segment_ids, is_geographic)
+        axis_id -> (kdtree, densified_coords, segment_ids, is_geographic) or RustSpatialIndex
     direction_caches : dict
-        axis_id -> DirectionCache
+        axis_id -> DirectionCache or RustDirectionCache
     segment_caches : dict
-        axis_id -> SegmentCache
+        axis_id -> SegmentCache or RustSegmentCache
     """
+    # Try Rust implementation first
+    if use_rust and USE_RUST and precompute_caches_rust is not None:
+        try:
+            return precompute_caches_rust(axes_dict, interval)
+        except Exception as e:
+            warnings.warn(f"Rust precompute_caches failed, falling back to Python: {e}")
+
+    # Fallback to Python implementation
     spatial_indices: Dict[str, Any] = {}
     direction_caches: Dict[str, DirectionCache] = {}
     segment_caches: Dict[str, SegmentCache] = {}

@@ -1,3 +1,68 @@
+# Rust Map Matching Docker Integration Plan
+
+## Overview
+Integrate the Rust `map_matching` extension into the Docker build process.
+
+## Files to Modify
+
+### 1. `requirements-prod.txt`
+
+Add numpy explicitly (required by the Rust extension):
+
+```diff
+ scipy
+ beautifulsoup4
++numpy>=1.24.0
+```
+
+### 2. `backend/rust/map_matching/.cargo/config.toml`
+
+Replace hardcoded cascadelake target with comments (CPU target will be set via RUSTFLAGS):
+
+**Replace entire file with:**
+
+```toml
+# Cargo configuration for map_matching
+# CPU target configured via RUSTFLAGS environment variable at build time
+#
+# Examples:
+# - Local development: RUSTFLAGS="-C target-cpu=native"
+# - EC2 Cascade Lake: RUSTFLAGS="-C target-cpu=cascadelake"
+# - Docker portable:  RUSTFLAGS="-C target-cpu=x86-64-v3"
+#
+# The Makefile and Dockerfile set RUSTFLAGS="-C target-cpu=native" by default
+
+# Uncomment below for local development on Cascade Lake machines:
+# [build]
+# rustflags = ["-C", "target-cpu=cascadelake"]
+```
+
+### 3. `backend/rust/map_matching/Makefile`
+
+Update to use `native` CPU target instead of `cascadelake`:
+
+```diff
+ # Build in release mode (optimized)
+ build-release:
+-	RUSTFLAGS="-C target-cpu=cascadelake" maturin build --release
++	RUSTFLAGS="-C target-cpu=native" maturin build --release
+ 
+ # Install in development mode
+ develop:
+-	RUSTFLAGS="-C target-cpu=cascadelake" maturin develop --release
++	RUSTFLAGS="-C target-cpu=native" maturin develop --release
+
+ # Build wheels for distribution
+ wheels:
+-	RUSTFLAGS="-C target-cpu=cascadelake" maturin build --release
++	RUSTFLAGS="-C target-cpu=native" maturin build --release
+```
+
+### 4. `docker/Dockerfile`
+
+Add Rust build stage. Replace entire file with:
+
+```dockerfile
 FROM python:3.12-alpine3.20 as base
 
 # ============================================================================
@@ -97,3 +162,40 @@ COPY ./backend ./backend
 
 EXPOSE 8000
 ENTRYPOINT ["/bin/sh", "docker/entrypoint.sh"]
+```
+
+## Verification Steps
+
+After making the changes, verify with:
+
+```bash
+# 1. Build the Docker image
+docker build -f docker/Dockerfile --target prod -t uoct-backend:test .
+
+# 2. Test that map_matching is available
+docker run --rm uoct-backend:test python -c "import map_matching; print(f'Version: {map_matching.__version__}')"
+
+# 3. Run the test suite
+docker run --rm uoct-backend:test python -m pytest backend/rust/map_matching/python/tests/ -v
+```
+
+## Local Testing (without Docker)
+
+```bash
+# Install Rust (one-time)
+curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y
+source $HOME/.cargo/env
+
+# Install Python dependencies
+pip install maturin pytest numpy
+
+# Build and test
+cd backend/rust/map_matching
+make test
+```
+
+## Notes
+
+- The Docker build uses `target-cpu=native` which auto-detects the build machine's CPU
+- For maximum performance on EC2 Cascade Lake instances, the EC2 deployment should ideally build with `target-cpu=cascadelake`
+- If building on a different CPU than the deployment target, consider using `target-cpu=x86-64-v3` for broad compatibility with AVX2-capable CPUs
