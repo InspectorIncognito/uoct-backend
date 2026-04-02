@@ -79,7 +79,7 @@ def calculate_bearing(geometry):
 
 def split_axis_by_direction(
     df: gpd.GeoDataFrame,
-    bearing_threshold: float = 90.0,
+    bearing_threshold: float = 80.0,
 ) -> List[gpd.GeoDataFrame]:
     """Split a GeoDataFrame by direction using graph connectivity.
 
@@ -1733,11 +1733,11 @@ def process_osm_queries(
             if axle.name == "Eje Américo Vespucio":
                 query = VESPUCIO_QUERY
                 # Vespucio uses special query, can't use traffic signals template
-                use_signals_for_axis = False
+                use_signals_for_axis = True
             elif axle.name == "Eje Independencia":
                 query = INDEPENDENCIA_QUERY
                 # Independencia uses special query, can't use traffic signals template
-                use_signals_for_axis = False
+                use_signals_for_axis = True
             else:
                 # Use streets+signals template when traffic signals mode is enabled
                 query = osm_downloader.build_overpass_query(

@@ -175,7 +175,12 @@ way(r)
   [name~"(Autopista Vespucio Oriente|Avenida Ossa)"];"""
 
 VESPUCIO_QUERY = """relation(6582778);
-way(r);"""
+way(r)->.streets;
+(
+  .streets;
+  node(w.streets)[highway=traffic_signals];
+);
+out geom;"""
 
 INDEPENDENCIA_QUERY = """
 rel(1674530);
@@ -186,7 +191,13 @@ way(area.target_area)
   ->.filtered_ways;
 way(589714638) ->.extra_way_1;
 way(1350031432) ->.extra_way_2;
-(.filtered_ways; .extra_way_1; .extra_way_2;);"""
+// Unificas todas las ways
+(.filtered_ways; .extra_way_1; .extra_way_2;) -> .streets;
+(
+  .streets;
+  node(w.streets)[highway=traffic_signals];
+);
+out geom;"""
 
 
 def get_axis_config(axis_name: str) -> dict:
