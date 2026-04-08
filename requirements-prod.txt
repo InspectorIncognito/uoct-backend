@@ -21,4 +21,3 @@ geopandas
 jinja2
 scipy
 beautifulsoup4
-numpy>=1.24.0

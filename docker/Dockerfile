@@ -1,34 +1,5 @@
 FROM python:3.12-alpine3.20 as base
 
-# ============================================================================
-# Rust Builder Stage - Build the map_matching extension
-# ============================================================================
-FROM base as rust-builder
-
-# Install build dependencies for Rust compilation
-RUN apk add --no-cache \
-    curl \
-    build-base \
-    openssl-dev \
-    musl-dev
-
-# Install Rust
-RUN curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --default-toolchain stable
-ENV PATH="/root/.cargo/bin:${PATH}"
-
-# Install maturin for building Python wheels from Rust
-RUN pip install maturin
-
-# Copy and build the Rust map_matching extension
-COPY backend/rust/map_matching /build/map_matching
-WORKDIR /build/map_matching
-
-# Build with native CPU optimizations (auto-detect at build time)
-RUN RUSTFLAGS="-C target-cpu=native" maturin build --release
-
-# ============================================================================
-# Dependencies Stage
-# ============================================================================
 FROM base as dependencies
 
 RUN /bin/sh -c "apk update"
@@ -45,9 +16,6 @@ RUN /bin/sh -c "apk add --no-cache \
     postgresql-dev\
     "
 
-# ============================================================================
-# Requirements Stage - Install Python dependencies
-# ============================================================================
 FROM dependencies as requirements
 
 RUN mkdir /install
@@ -55,13 +23,6 @@ COPY requirements-prod.txt /install/requirements-prod.txt
 RUN /bin/sh -c 'pip3 install --no-cache-dir --upgrade pip'
 RUN /bin/sh -c 'pip3 install --no-cache-dir --no-warn-script-location --prefix /install -r /install/requirements-prod.txt'
 
-# Install the Rust map_matching wheel
-COPY --from=rust-builder /build/map_matching/target/wheels/*.whl /tmp/
-RUN pip3 install --no-cache-dir --no-warn-script-location --prefix /install /tmp/map_matching*.whl && rm /tmp/*.whl
-
-# ============================================================================
-# Dev Stage
-# ============================================================================
 FROM requirements as dev
 
 ENV PYTHONUNBUFFERED 1
@@ -77,9 +38,7 @@ EXPOSE 8000
 ENTRYPOINT ["/bin/sh", "docker/entrypoint.sh"]
 COPY ./backend ./backend
 
-# ============================================================================
-# Prod Stage - Set build target as prod in your docker-compose file
-# ============================================================================
+# Set build target as prod in your docker-compose file
 FROM requirements as prod
 
 # Prevents Python from writing pyc files to disc
