@@ -133,3 +133,6 @@ dmypy.json
 
 # GeoJSON files
 *.geojson
+
+# Opencode
+*.opencode
