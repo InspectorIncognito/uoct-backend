@@ -1,22 +1,10 @@
 from django.urls import path
-from rest_api.views import (
-    AlertViewSet,
-    AxlesViewSet,
-    CameraViewSet,
-    GeoJSONViewSet,
-    GridViewSet,
-    GTFSShapeViewSet,
-    GTFSStopsViewSet,
-    HistoricSpeedViewSet,
-    ProcessAxisView,
-    SegmentViewSet,
-    ServicesViewSet,
-    ShapeViewSet,
-    SpeedViewSet,
-    StopViewSet,
-    TestView,
-    TrafficSignalViewSet,
-)
+from rest_api.views import (AlertViewSet, AxlesViewSet, CameraViewSet,
+                            GeoJSONViewSet, GridViewSet, GTFSShapeViewSet,
+                            GTFSStopsViewSet, HistoricSpeedViewSet,
+                            ProcessAxisView, SegmentViewSet, ServicesViewSet,
+                            ShapeViewSet, SpeedViewSet, StopViewSet, TestView,
+                            TrafficSignalViewSet)
 from rest_framework.routers import DefaultRouter
 
 # Wire up our API using automatic URL routing.

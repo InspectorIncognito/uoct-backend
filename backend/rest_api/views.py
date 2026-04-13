@@ -375,6 +375,7 @@ class SpeedViewSet(GenericSpeedViewSet):
         )
 
     def to_csv_local(self, request, *args, **kwargs):
+        """Export CSV with Chile local time (America/Santiago, automatic DST)."""
         where_sql, params = self._build_where_clause(request.query_params, alias="sp")
 
         if len(request.query_params) == 0:
@@ -421,6 +422,7 @@ class SpeedViewSet(GenericSpeedViewSet):
         )
 
     def to_csv_local_gz(self, request, *args, **kwargs):
+        """Export gzipped CSV with Chile local time (America/Santiago, automatic DST)."""
         where_sql, params = self._build_where_clause(request.query_params, alias="sp")
 
         if len(request.query_params) == 0:
@@ -540,6 +542,7 @@ class HistoricSpeedViewSet(GenericSpeedViewSet):
         )
 
     def to_csv_local(self, request, *args, **kwargs):
+        """Export CSV with Chile local time (America/Santiago, automatic DST)."""
         where_sql, params = self._build_where_clause(request.query_params, alias="hs")
 
         if len(request.query_params) == 0:
@@ -584,6 +587,7 @@ class HistoricSpeedViewSet(GenericSpeedViewSet):
         )
 
     def to_csv_local_gz(self, request, *args, **kwargs):
+        """Export gzipped CSV with Chile local time (America/Santiago, automatic DST)."""
         where_sql, params = self._build_where_clause(request.query_params, alias="hs")
 
         if len(request.query_params) == 0:
