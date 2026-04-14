@@ -8,16 +8,16 @@ import networkx as nx
 import numpy as np
 import pandas as pd
 from haversine import Unit, haversine
+from processors.geometry.point import Point as p
+from processors.geometry.utils import interpolate_points_by_distance
+from processors.osm.query import (INDEPENDENCIA_QUERY, VESPUCIO_QUERY,
+                                  OSMDownloader)
 from rest_api.models import Axles, Shape, TrafficSignal
 from rest_api.util.shape import flush_shape_objects
 from shapely import Point
 from shapely.geometry import LineString as shp_LineString
 from shapely.geometry import MultiLineString as shp_MultiLineString
 from shapely.ops import linemerge, unary_union
-
-from processors.geometry.point import Point as p
-from processors.geometry.utils import interpolate_points_by_distance
-from processors.osm.query import INDEPENDENCIA_QUERY, VESPUCIO_QUERY, OSMDownloader
 
 # ============================================================================
 # Configuration for traffic signal-based segmentation
@@ -29,6 +29,8 @@ TRAFFIC_SIGNAL_CONFIG = {
     "min_segment_length_m": 350.0,  # Minimum segment length (avoid very short segments)
     "max_segment_length_m": 650.0,  # Maximum segment length (avoid very long segments)
 }
+
+PROYECTION_CRS = "EPSG:3857"  # Metric CRS for distance calculations
 
 
 def bearing_from_coords(a, b) -> float:
@@ -79,7 +81,7 @@ def calculate_bearing(geometry):
 
 def split_axis_by_direction(
     df: gpd.GeoDataFrame,
-    bearing_threshold: float = 80.0,
+    bearing_threshold: float = 90.0,
 ) -> List[gpd.GeoDataFrame]:
     """Split a GeoDataFrame by direction using graph connectivity.
 
@@ -129,26 +131,23 @@ def split_axis_by_direction(
     if expanded_df.empty:
         return []
 
-    # 2. Build Graph
+    # 2. Build graph in a metric CRS for consistent distance operations.
     G = nx.Graph()
     for idx in expanded_df.index:
         G.add_node(idx)
 
-    # Create spatial index
-    sindex = expanded_df.sindex
-
-    # Helper for distance (approximate in degrees for speed, or project?)
-    # Let's project to 3857 for accurate distance checks
-    expanded_metric = expanded_df.to_crs("EPSG:3857")
+    metric_crs = expanded_df.estimate_utm_crs() or PROYECTION_CRS
+    expanded_metric = expanded_df.to_crs(metric_crs)
+    sindex = expanded_metric.sindex
+    neighbor_search_m = 900.0
 
     # We iterate over the metric dataframe for distance checks
     for idx, row in expanded_metric.iterrows():
         geom = row.geometry
-        bearing = expanded_df.at[idx, "bearing"]
+        bearing = row["bearing"]
 
-        # Query neighbors within ~1km (0.01 deg) buffer to ensure we catch 550m gaps
-        # geom is in 4326
-        search_bounds = expanded_df.at[idx, "geometry"].buffer(0.01).bounds
+        # Query neighbors in meters to catch potential ~550m gaps.
+        search_bounds = geom.buffer(neighbor_search_m).bounds
         possible_matches = list(sindex.intersection(search_bounds))
 
         p_end = Point(geom.coords[-1])
@@ -160,7 +159,7 @@ def split_axis_by_direction(
                 continue
 
             match_geom = expanded_metric.at[match_idx, "geometry"]
-            match_bearing = expanded_df.at[match_idx, "bearing"]
+            match_bearing = expanded_metric.at[match_idx, "bearing"]
 
             # Check alignment first (fastest)
             diff = min(abs(bearing - match_bearing), 360 - abs(bearing - match_bearing))
@@ -189,7 +188,7 @@ def split_axis_by_direction(
             for match_idx, dist in candidates:
                 if dist <= dist_threshold:
                     # Re-calculate angle diff for sorting
-                    match_bearing = expanded_df.at[match_idx, "bearing"]
+                    match_bearing = expanded_metric.at[match_idx, "bearing"]
                     diff = min(
                         abs(bearing - match_bearing),
                         360 - abs(bearing - match_bearing),
@@ -237,6 +236,7 @@ def split_axis_by_direction(
             f"Warning: more than two components detected ({len(component_stats)}). "
             "Merging components with similar bearings."
         )
+        print(f"Bearings: {[expanded_df.loc[comp_indices]['bearing'].mean() for comp_indices, _ in component_stats]}")
 
         # Group components by average bearing
         groups = {}  # key: group average bearing, value: accumulated GeoDataFrame
@@ -254,7 +254,7 @@ def split_axis_by_direction(
                 )
 
                 # If bearings are similar -> merge
-                if diff < 120.0:  # Reasonable threshold to separate forward/backward
+                if diff < 100.0:  # Reasonable threshold to separate forward/backward
                     groups[key_bearing] = pd.concat(
                         [groups[key_bearing], group_df], ignore_index=True
                     )
@@ -268,7 +268,7 @@ def split_axis_by_direction(
         # Now sort groups by total length (in meters)
         grouped_stats = []
         for key_bearing, gdf in groups.items():
-            gdf_metric = gdf.to_crs("EPSG:3857")
+            gdf_metric = gdf.to_crs(metric_crs)
             total_len = gdf_metric.geometry.length.sum()
             grouped_stats.append((gdf, total_len))
 
@@ -790,19 +790,30 @@ def segment_shape_by_distance(
     if len(output_linestrings) >= 2:
         last_line = output_linestrings[-1]
         prev_line = output_linestrings[-2]
-        if last_line.length < 0.75 * distance_threshold:
+        last_line_distance_m = 0.0
+        last_coords = list(last_line.coords)
+        for (lon1, lat1), (lon2, lat2) in zip(last_coords[:-1], last_coords[1:]):
+            last_line_distance_m += haversine(
+                (lat1, lon1),
+                (lat2, lon2),
+                unit=Unit.METERS,
+            )
+
+        if last_line_distance_m < 0.75 * distance_threshold:
             # Create a new LineString concatenating coordinates
             merged_coords = list(prev_line.coords) + list(last_line.coords)[1:]
             output_linestrings[-2] = shp_LineString(merged_coords)
             output_linestrings.pop(-1)
 
     # Path rectification using Douglas-Peucker algorithm
-    gdf_segments = gpd.GeoDataFrame(geometry=output_linestrings, crs="EPSG:4326")
-    gdf_segments = gdf_segments.to_crs("EPSG:3857")  # reproject to meters
+    orig_crs = shape.crs or "EPSG:4326"
+    gdf_segments = gpd.GeoDataFrame(geometry=output_linestrings, crs=orig_crs)
+    metric_crs = gdf_segments.estimate_utm_crs() or PROYECTION_CRS
+    gdf_segments = gdf_segments.to_crs(metric_crs)  # reproject to meters
     gdf_segments["geometry"] = gdf_segments.simplify(
         tolerance=4, preserve_topology=True
     )  # 4 meters tolerance
-    gdf_segments = gdf_segments.to_crs("EPSG:4326")
+    gdf_segments = gdf_segments.to_crs(orig_crs)
 
     # Add per-segment bearing (first -> last point)
     gdf_segments["bearing"] = gdf_segments.geometry.apply(line_first_last_bearing)
@@ -1509,6 +1520,17 @@ def _build_segments_with_signals(
                 }
             )
 
+    # If the last segment is a short tail created by a traffic signal cut,
+    # drop it so the axis ends at that signal.
+    if len(output_data) >= 2:
+        last_seg = output_data[-1]
+        if (
+            last_seg["geometry"].length < min_segment_length_m
+            and last_seg["start_signal_osm_id"] is not None
+            and last_seg["end_signal_osm_id"] is None
+        ):
+            output_data.pop(-1)
+
     # Merge very short last segment with previous
     if len(output_data) >= 2:
         last_seg = output_data[-1]
@@ -1842,9 +1864,8 @@ def process_shape_data(
 
                 # Save relevant traffic signals to DB BEFORE processing segments
                 if not relevant_signals.empty:
-                    from rest_api.util.traffic_signals import (
-                        save_relevant_traffic_signals,
-                    )
+                    from rest_api.util.traffic_signals import \
+                        save_relevant_traffic_signals
 
                     print(f"  Saving {len(relevant_signals)} traffic signals to DB...")
                     signals_map = save_relevant_traffic_signals(relevant_signals)
@@ -1860,6 +1881,9 @@ def process_shape_data(
     # Filter to only keep LineString geometries (exclude Points which are traffic signals)
     query_data = query_data[query_data.geometry.type == "LineString"].copy()
 
+    # Use one metric CRS for all meter-based operations in this axis processing.
+    metric_crs = query_data.estimate_utm_crs() or PROYECTION_CRS
+
     # STEP 1: Calculate original bearings
     query_data["original_bearing"] = query_data.geometry.apply(calculate_bearing)
 
@@ -1874,8 +1898,8 @@ def process_shape_data(
             b = row.get("original_bearing") or calculate_bearing(row.geometry)
             if b is not None:
                 bearings.append(b)
-                geom_metric = gpd.GeoSeries([row.geometry], crs="EPSG:4326").to_crs(
-                    "EPSG:3857"
+                geom_metric = gpd.GeoSeries([row.geometry], crs=query_data.crs).to_crs(
+                    metric_crs
                 )[0]
                 lengths.append(geom_metric.length)
 

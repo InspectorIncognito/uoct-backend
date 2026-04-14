@@ -175,12 +175,18 @@ way(r)
   [name~"(Autopista Vespucio Oriente|Avenida Ossa)"];"""
 
 VESPUCIO_QUERY = """relation(6582778);
-way(r)->.streets;
+way(r)->.motorway;
+way(around.motorway:20)
+  [highway=primary]
+  ->.primary_streets;
 (
-  .streets;
-  node(w.streets)[highway=traffic_signals];
+  // Mantienes el eje original
+  .motorway;
+  node(w.primary_streets)
+    [highway=traffic_signals];
 );
-out geom;"""
+out geom;
+"""
 
 INDEPENDENCIA_QUERY = """
 rel(1674530);
