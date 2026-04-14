@@ -14,35 +14,16 @@ from geojson import Feature, FeatureCollection, Point
 from gtfs_rt.processors.speed import calculate_speed
 from gtfs_rt.utils import get_last_temporal_range, get_previous_month
 from processors.models.shapes import shapes_to_geojson
-from rest_api.models import (
-    Alert,
-    AlertThreshold,
-    Axles,
-    Camera,
-    GTFSShape,
-    HistoricSpeed,
-    Segment,
-    Services,
-    Shape,
-    Speed,
-    Stop,
-    TrafficSignal,
-)
-from rest_api.serializers import (
-    AlertSerializer,
-    AlertThresholdSerializer,
-    AxlesSerializer,
-    CameraSerializer,
-    GTFSShapeSerializer,
-    HistoricSpeedSerializer,
-    ProcessAxisSerializer,
-    SegmentSerializer,
-    ServicesSerializer,
-    ShapeSerializer,
-    SpeedSerializer,
-    StopSerializer,
-    TrafficSignalSerializer,
-)
+from rest_api.models import (Alert, AlertThreshold, Axles, Camera, GTFSShape,
+                             HistoricSpeed, Segment, Services, Shape, Speed,
+                             Stop, TrafficSignal)
+from rest_api.serializers import (AlertSerializer, AlertThresholdSerializer,
+                                  AxlesSerializer, CameraSerializer,
+                                  GTFSShapeSerializer, HistoricSpeedSerializer,
+                                  ProcessAxisSerializer, SegmentSerializer,
+                                  ServicesSerializer, ShapeSerializer,
+                                  SpeedSerializer, StopSerializer,
+                                  TrafficSignalSerializer)
 from rest_framework import generics, mixins, viewsets
 from rest_framework.filters import OrderingFilter
 from rest_framework.permissions import AllowAny
@@ -230,7 +211,8 @@ class GenericSpeedViewSet(viewsets.ModelViewSet, mixins.ListModelMixin):
         read_fd, write_fd = os.pipe()
 
         def _worker():
-            from django.db import connection as _conn  # thread-local connection
+            from django.db import \
+                connection as _conn  # thread-local connection
 
             try:
                 with os.fdopen(write_fd, "wb") as pipe_w:
@@ -775,17 +757,9 @@ class AxlesViewSet(viewsets.ModelViewSet):
         - Segments
         - Shapes
         """
-        from rest_api.models import (
-            Alert,
-            Camera,
-            HistoricSpeed,
-            Segment,
-            Services,
-            Shape,
-            Speed,
-            Stop,
-            TrafficSignal,
-        )
+        from rest_api.models import (Alert, Camera, HistoricSpeed, Segment,
+                                     Services, Shape, Speed, Stop,
+                                     TrafficSignal)
 
         # Find all shapes for this axis (e.g., "Eje Alameda_0", "Eje Alameda_1")
         shapes = Shape.objects.filter(name__startswith=f"{axis_name}_")
@@ -828,15 +802,31 @@ class AxlesViewSet(viewsets.ModelViewSet):
         # 6. Delete Camera records (note: field is segment_id, not segment)
         cameras_deleted, _ = Camera.objects.filter(segment_id__in=segments).delete()
 
-        # 7. Delete TrafficSignal records (note: field is segment_id, not segment)
-        signals_deleted, _ = TrafficSignal.objects.filter(
-            segment_id__in=segments
-        ).delete()
+        # 7. Collect related TrafficSignal ids before deleting segments.
+        # Signals are linked from Segment via start_signal/end_signal.
+        signal_ids = set(
+            segments.exclude(start_signal__isnull=True).values_list(
+                "start_signal_id", flat=True
+            )
+        )
+        signal_ids.update(
+            segments.exclude(end_signal__isnull=True).values_list(
+                "end_signal_id", flat=True
+            )
+        )
 
         # 8. Delete Segments
         segments_deleted, _ = segments.delete()
 
-        # 9. Delete Shapes
+        # 9. Delete orphan TrafficSignal records that belonged to removed segments.
+        signals_deleted = 0
+        if signal_ids:
+            signals_deleted, _ = TrafficSignal.objects.filter(id__in=signal_ids).filter(
+                segments_starting_here__isnull=True,
+                segments_ending_here__isnull=True,
+            ).delete()
+
+        # 10. Delete Shapes
         shapes_deleted, _ = shapes.delete()
 
         return {
