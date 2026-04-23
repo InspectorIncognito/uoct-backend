@@ -8,9 +8,10 @@ from zoneinfo import ZoneInfo
 import requests
 from decouple import config
 from django.utils import timezone
-from gtfs_rt.utils import get_day_type, get_last_temporal_range, get_temporal_segment
-
-from rest_api.models import Alert, AlertThreshold, HistoricSpeed, Segment, Speed
+from gtfs_rt.utils import (get_day_type, get_last_temporal_range,
+                           get_temporal_segment)
+from rest_api.models import (Alert, AlertThreshold, HistoricSpeed, Segment,
+                             Speed)
 
 logger = logging.getLogger()
 DAYS = ["monday", "tuesday", "wednesday", "thursday", "friday", "saturday", "sunday"]
@@ -234,14 +235,16 @@ def create_alert_data(segment: Segment, speed: Speed):
     prefill_data = "|".join(
         [shape_id, segment_id, temporal_segment, day_type, detected_speed]
     )
-    alert_prefill_data = "&entry.1001130690={}".format(prefill_data)
+    alert_prefill_data = "&entry.1084383620={}".format(prefill_data)
 
-    alert_url = "https://docs.google.com/forms/d/e/1FAIpQLSfPOqOT45GnlP_gBol0613yl2X-ObMC6ApWfTLnSSrcpGdRKg/viewform?usp=pp_url{}".format(
+    alert_url = "https://docs.google.com/forms/d/e/1FAIpQLSdA1rZ1PwADaPQ8Hhf8zlgOVpGfXmRZmDOC0aXJTkSSQAlMpQ/viewform?usp=pp_url{}".format(
         alert_prefill_data
     )
 
     alert_data["message"] = """
-        Hemos detectado <strong>congestión</strong>, ayúdanos a resolverla respondiendo esta breve encuesta🚌<br><a target="_blank" href="{}">Presiona aquí👈</a>
+        ¡Gana $30.000 para tu <strong>tarjeta Bip!</strong> 💳<br>
+        Ayúdanos a mejorar el viaje reportando la congestión en esta breve encuesta. 🚌<br>
+        <a target="_blank" href="{}">👉 Presiona aquí para participar</a>
         """.format(alert_url)
     alert_data["stops"] = [
         json.dumps(dict(label="Affected Stops", value="|".join(stops)))
