@@ -2,13 +2,12 @@ import datetime
 import time
 from collections import defaultdict
 
+from gtfs_rt.utils import get_last_temporal_range
 from rest_api.models import Segment, Speed
 from velocity.grid import GridManager
 from velocity.segment import FiveHundredMeterSegmentCriteria
 from velocity.utils import generate_grid
 from velocity.vehicle import VehicleManager
-
-from gtfs_rt.utils import get_last_temporal_range
 
 MAX_SPEED_KMH = 85.0  # Maximum speed threshold in km/h
 
@@ -47,7 +46,7 @@ def calculate_speed(
     segment_criteria = FiveHundredMeterSegmentCriteria(grid_obj)
     speed_records = vm.calculate_speed(segment_criteria)
     grouped_records = defaultdict(
-        lambda: {"distance_mts": 0.0, "time_secs": 0.0, "route_ids": set()}
+        lambda: {"distance_mts": 0.0, "time_secs": 0.0, "route_ids": list()}
     )
 
     for record in speed_records:
@@ -58,7 +57,7 @@ def calculate_speed(
         )
         grouped_records[key]["distance_mts"] += record["distance_mts"]
         grouped_records[key]["time_secs"] += record["time_secs"]
-        grouped_records[key]["route_ids"].add(record["route_id"])
+        grouped_records[key]["route_ids"].append(record["route_id"])
 
     grouped_rows = []
     for (
