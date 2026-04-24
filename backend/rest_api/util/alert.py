@@ -242,8 +242,7 @@ def create_alert_data(segment: Segment, speed: Speed):
     )
 
     alert_data["message"] = """
-        ¡Gana $30.000 para tu <strong>tarjeta Bip!</strong> 💳<br>
-        Ayúdanos a mejorar el viaje reportando la congestión en esta breve encuesta. 🚌<br>
+        Ayúdanos y participa por $30.000 para tu Bip!</strong> 💳<br>
         <a target="_blank" href="{}">👉 Presiona aquí para participar</a>
         """.format(alert_url)
     alert_data["stops"] = [
