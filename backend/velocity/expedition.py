@@ -339,6 +339,7 @@ class ExpeditionData:
         )
         row = dict(
             route_id=self.route_id,
+            license_plate=self.license_plate,
             shape_id=self.shape_id,
             pattern_id="pattern",
             spatial_segment_index=spatial_segment_obj.index,

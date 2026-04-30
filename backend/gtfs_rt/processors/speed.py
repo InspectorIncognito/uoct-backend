@@ -57,7 +57,7 @@ def calculate_speed(
         )
         grouped_records[key]["distance_mts"] += record["distance_mts"]
         grouped_records[key]["time_secs"] += record["time_secs"]
-        grouped_records[key]["route_ids"].append(record["route_id"])
+        grouped_records[key]["route_ids"].append(f"{record['route_id']}|{record['license_plate']}")
 
     grouped_rows = []
     for (
