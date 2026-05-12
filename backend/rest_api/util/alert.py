@@ -213,27 +213,23 @@ def create_alert_data(segment: Segment, speed: Speed, interval: int = 15):
     ts_start_minutes = ts * interval
     ts_end_minutes = (ts + 1) * interval
 
-    speed_date_utc = speed.timestamp.date()
-
-    ts_utc_start = datetime.datetime(
-        speed_date_utc.year, speed_date_utc.month, speed_date_utc.day,
-        ts_start_minutes // 60, ts_start_minutes % 60,
-        tzinfo=ZoneInfo("UTC"),
-    )
-    ts_utc_end = ts_utc_start + timedelta(minutes=interval)
-    # Convertir a Santiago para los campos del formulario
-    ts_santiago_start = ts_utc_start.astimezone(SANTIAGO_TZ)
-    ts_santiago_end = ts_utc_end.astimezone(SANTIAGO_TZ)
+    ts_start = datetime.time(hour=ts_start_minutes // 60, minute=ts_start_minutes % 60)
+    ts_end = datetime.time(hour=ts_end_minutes // 60, minute=ts_end_minutes % 60)
 
     weekday = now.weekday()
     for idx, day in enumerate(DAYS):
         if idx == weekday:
             alert_data[day] = "on"
+    # Set date range: yesterday to tomorrow to ensure alert is valid
+    alert_data["start"] = (now - timedelta(days=1)).strftime("%m/%d/%Y")
+    alert_data["end"] = (now + timedelta(days=1)).strftime("%m/%d/%Y")
 
-    alert_data["start"] = (ts_santiago_start - timedelta(days=1)).strftime("%m/%d/%Y")
-    alert_data["end"] = (ts_santiago_start + timedelta(days=1)).strftime("%m/%d/%Y")
-    alert_data["start_time_day"] = f"{ts_santiago_start.hour:02}:{ts_santiago_start.minute:02}:00"
-    alert_data["end_time_day"] = f"{ts_santiago_end.hour:02}:{ts_santiago_end.minute:02}:00"
+    # start_time_day = now.time()
+    # end_time_day = (now + timedelta(minutes=20)).time()
+    alert_data["start_time_day"] = (
+        f"{ts_start.hour:02}:{ts_start.minute:02}:00"
+    )
+    alert_data["end_time_day"] = f"{ts_end.hour:02}:{ts_end.minute:02}:00"
 
     segment_uuid = str(segment.segment_id)
     segment_id = str(segment.pk)
