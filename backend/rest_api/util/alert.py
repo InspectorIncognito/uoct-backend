@@ -201,12 +201,21 @@ def update_alert_from_admin(
     return res
 
 
-def create_alert_data(segment: Segment, speed: Speed):
+def create_alert_data(segment: Segment, speed: Speed, interval: int = 15):
     alert_data = dict()
     stops = segment.get_stops()
 
     now = get_santiago_time()
     now = now.replace(microsecond=0)
+
+    # Derivar los límites reales del temporal segment
+    ts = int(speed.temporal_segment)
+    ts_start_minutes = ts * interval
+    ts_end_minutes = (ts + 1) * interval
+
+    ts_start = datetime.time(hour=ts_start_minutes // 60, minute=ts_start_minutes % 60)
+    ts_end = datetime.time(hour=ts_end_minutes // 60, minute=ts_end_minutes % 60)
+
     weekday = now.weekday()
     for idx, day in enumerate(DAYS):
         if idx == weekday:
@@ -215,12 +224,12 @@ def create_alert_data(segment: Segment, speed: Speed):
     alert_data["start"] = (now - timedelta(days=1)).strftime("%m/%d/%Y")
     alert_data["end"] = (now + timedelta(days=1)).strftime("%m/%d/%Y")
 
-    start_time_day = now.time()
-    end_time_day = (now + timedelta(minutes=20)).time()
+    # start_time_day = now.time()
+    # end_time_day = (now + timedelta(minutes=20)).time()
     alert_data["start_time_day"] = (
-        f"{start_time_day.hour:02}:{start_time_day.minute:02}:00"
+        f"{ts_start.hour:02}:{ts_start.minute:02}:00"
     )
-    alert_data["end_time_day"] = f"{end_time_day.hour:02}:{end_time_day.minute:02}:00"
+    alert_data["end_time_day"] = f"{ts_end.hour:02}:{ts_end.minute:02}:00"
 
     segment_uuid = str(segment.segment_id)
     segment_id = str(segment.pk)
@@ -319,9 +328,10 @@ def update_alerts(
         start_time, end_time = get_last_temporal_range()
 
     temporal_segment = get_temporal_segment(start_time)
+    alert_date = start_time.date()
     alerts = Alert.objects.filter(
-        timestamp__gte=start_time,
-        timestamp__lte=end_time,
+        temporal_segment = temporal_segment,
+        detected_speed__timestamp__date=alert_date,
     )
     alert_data = site_manager.get_all_alerts()
 
@@ -345,8 +355,8 @@ def update_alerts(
         segment_uuid = site_alert.get("name").split(" ")[-1]
         alert_obj = Alert.objects.filter(
             segment__segment_id=segment_uuid,
-            timestamp__gte=start_time,
-            timestamp__lte=end_time,
+            temporal_segment=temporal_segment,
+            detected_speed__timestamp__date=alert_date,
         ).first()
         if alert_obj is None:
             continue
