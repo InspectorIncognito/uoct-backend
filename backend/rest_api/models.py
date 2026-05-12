@@ -354,7 +354,6 @@ class Alert(models.Model):
         indexes = [
             models.Index(fields=["segment", "temporal_segment"]),
             models.Index(fields=["timestamp"]),
-            models.Index(fields=["temporal_segment", "timestamp"]),
         ]
 
     def get_key_value(self):
