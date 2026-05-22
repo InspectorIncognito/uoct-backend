@@ -9,9 +9,13 @@ import pytz
 import requests
 from bs4 import BeautifulSoup
 from decouple import config
+from django.core.cache import cache
 from django.utils import timezone
 
 from gtfs_rt.models import GPSPulse
+
+GTFS_RT_ALLOWED_SERVICE_ROUTES_CACHE_KEY = "gtfs_rt:allowed_service_routes"
+GTFS_RT_ALLOWED_SERVICE_ROUTES_CACHE_TTL = 1800
 
 MAD_CONST = 1.4826
 
@@ -100,6 +104,29 @@ def get_previous_month():
     current_date = current_datetime.replace(day=1)
     current_date = current_date - timedelta(days=1)
     return current_date.month
+
+
+def normalize_service_id(service_id: str) -> str:
+    return service_id[:-1] if service_id.endswith(("R", "I")) else service_id
+
+
+def get_allowed_service_routes():
+    def compute_allowed_service_routes():
+        from rest_api.util.shape import ShapeManager
+
+        shape_manager = ShapeManager()
+        all_services = shape_manager.get_all_services()
+        return tuple(sorted({normalize_service_id(service) for service in all_services}))
+
+    return cache.get_or_set(
+        GTFS_RT_ALLOWED_SERVICE_ROUTES_CACHE_KEY,
+        compute_allowed_service_routes,
+        GTFS_RT_ALLOWED_SERVICE_ROUTES_CACHE_TTL,
+    )
+
+
+def invalidate_gtfs_rt_cache():
+    cache.delete(GTFS_RT_ALLOWED_SERVICE_ROUTES_CACHE_KEY)
 
 
 def flush_gps_pulses():

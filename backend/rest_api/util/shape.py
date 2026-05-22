@@ -16,6 +16,7 @@ from rest_api.models import (
 from rest_api.util.hmm.hmm import precompute_axes_caches
 from shapely.geometry import LineString as shp_LineString
 from velocity.constants import DEG_PI, DEG_PI_HALF
+from gtfs_rt.utils import invalidate_gtfs_rt_cache
 
 
 class ShapeManager:
@@ -131,6 +132,7 @@ def flush_shape_objects():
         # Then delete segments and shapes
         Segment.objects.all().delete()
         Shape.objects.all().delete()
+        invalidate_gtfs_rt_cache()
         print(
             "Flushed shapes and related objects (segments, speeds, alerts, services, stops, signals)"
         )
