@@ -8,10 +8,8 @@ from zoneinfo import ZoneInfo
 import requests
 from decouple import config
 from django.utils import timezone
-from gtfs_rt.utils import (get_day_type, get_last_temporal_range,
-                           get_temporal_segment)
-from rest_api.models import (Alert, AlertThreshold, HistoricSpeed, Segment,
-                             Speed)
+from gtfs_rt.utils import get_day_type, get_last_temporal_range, get_temporal_segment
+from rest_api.models import Alert, AlertThreshold, HistoricSpeed, Segment, Speed
 
 logger = logging.getLogger()
 DAYS = ["monday", "tuesday", "wednesday", "thursday", "friday", "saturday", "sunday"]
@@ -242,7 +240,7 @@ def create_alert_data(segment: Segment, speed: Speed):
     )
 
     alert_data["message"] = """
-        Ayúdanos y participa por $30.000 para tu Bip!</strong> 💳<br>
+        Ayúdanos contestanto esta breve encuesta para mejorar nuestro servicio!</strong> 🚌<br>
         <a target="_blank" href="{}">👉 Presiona aquí para participar</a>
         """.format(alert_url)
     alert_data["stops"] = [
