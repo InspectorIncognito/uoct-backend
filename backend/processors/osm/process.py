@@ -17,6 +17,7 @@ from shapely.ops import linemerge, unary_union
 from processors.geometry.point import Point as p
 from processors.geometry.utils import interpolate_points_by_distance
 from processors.osm.query import INDEPENDENCIA_QUERY, VESPUCIO_QUERY, OSMDownloader
+from velocity.constants import SEGMENT_DISTANCE_METERS
 
 
 def bearing_from_coords(a, b) -> float:
@@ -65,6 +66,21 @@ def calculate_bearing(geometry):
     return round(bearing, 2)
 
 
+def flatten_osm_tags(gdf: gpd.GeoDataFrame) -> gpd.GeoDataFrame:
+    """Expand the Overpass "tags" dict column (oneway, highway, name, lanes, ...)
+    into regular columns, so they can be read as row["oneway"], etc.
+
+    Columns that already exist (type, id, ...) are not overwritten.
+    """
+    if "tags" not in gdf.columns:
+        return gdf
+    tags = pd.json_normalize(
+        [t if isinstance(t, dict) else {} for t in gdf["tags"]]
+    ).set_index(gdf.index)
+    tags = tags[[c for c in tags.columns if c not in gdf.columns]]
+    return gdf.drop(columns=["tags"]).join(tags)
+
+
 def split_axis_by_direction(
     df: gpd.GeoDataFrame,
     bearing_threshold: float = 90.0,
@@ -93,12 +109,20 @@ def split_axis_by_direction(
         if bearing is None:
             continue
 
-        oneway = str(row.get("oneway", "no")).lower()
+        # A missing oneway tag (None/NaN) means a two-way street in OSM.
+        oneway = row.get("oneway")
+        oneway = "no" if oneway is None or pd.isna(oneway) else str(oneway).lower()
 
-        # Add original (forward)
         row_dict = row.to_dict()
         row_dict["original_idx"] = idx
-        row_dict["reversed"] = False
+        if oneway == "-1":
+            # One-way against the drawing direction: traffic goes end -> start.
+            row_dict["geometry"] = shp_LineString(list(geom.coords)[::-1])
+            row_dict["bearing"] = (bearing + 180) % 360
+            row_dict["reversed"] = True
+        else:
+            # Add original (forward)
+            row_dict["reversed"] = False
         new_rows.append(row_dict)
 
         # If bidirectional, add reversed
@@ -426,7 +450,7 @@ def keep_main_axis_lines(gdf, tol=10.0):
             if same_start and same_end:
                 # Parallel lines
                 # Keep the longest one
-                drop = i if lines[i].length > lines[j].length else j
+                drop = j if lines[i].length > lines[j].length else i
                 parallel_drop.add(drop)
                 parallel_keep.add(j if drop == i else i)
                 continue
@@ -718,9 +742,20 @@ def iterate_coords(geom):
             yield c
 
 
+def line_length_in_meters(line: shp_LineString, distance_algorithm: str = "euclidean") -> float:
+    """Length of a lon/lat LineString in meters, using the same distance as the segmentation."""
+    coords = list(line.coords)
+    return sum(
+        p(latitude=lat1, longitude=lon1).distance(
+            p(latitude=lat2, longitude=lon2), algorithm=distance_algorithm
+        )
+        for (lon1, lat1), (lon2, lat2) in zip(coords[:-1], coords[1:])
+    )
+
+
 def segment_shape_by_distance(
     shape: gpd.GeoDataFrame,
-    distance_threshold: float = 500,
+    distance_threshold: float = SEGMENT_DISTANCE_METERS,
     distance_algorithm: str = "euclidean",
 ) -> gpd.GeoDataFrame:
     if distance_threshold <= 0:
@@ -730,55 +765,55 @@ def segment_shape_by_distance(
     if not isinstance(geom, (shp_LineString, shp_MultiLineString)):
         raise ValueError("Input geometry must be a LineString or MultiLineString.")
 
+    def point_distance(a: Point, b: Point) -> float:
+        return p(latitude=a.y, longitude=a.x).distance(
+            p(latitude=b.y, longitude=b.x), algorithm=distance_algorithm
+        )
+
     previous_point = None
     segment = []
-    distance_accum = 0
+    distance_accum = 0.0
 
-    # Get the last coordinate to check against later
-    last_point = None
-    if geom.geom_type.startswith("Multi"):
-        last_point = list(geom.geoms[-1].coords)[-1]
-    else:
-        last_point = list(geom.coords)[-1]
-
-    for point in iterate_coords(geom):
-        lon, lat = point
+    for lon, lat in iterate_coords(geom):
         current_point = Point(lon, lat)
         if previous_point is None:
             previous_point = current_point
-            segment.append(current_point)
+            segment = [current_point]
             continue
-        previous_point_aux = p(latitude=previous_point.y, longitude=previous_point.x)
-        current_point_aux = p(latitude=current_point.y, longitude=current_point.x)
-        distance = previous_point_aux.distance(
-            current_point_aux, algorithm=distance_algorithm
-        )
-        if distance_accum + distance >= distance_threshold:
+        distance = point_distance(previous_point, current_point)
+        # One edge can be longer than the distance left in the current segment
+        # (or even longer than several segments), so keep cutting inside it.
+        while distance_accum + distance >= distance_threshold:
             left = distance_threshold - distance_accum
             if left > 1:
-                interpolated_point_coords = interpolate_points_by_distance(
-                    previous_point, current_point, distance_in_meters=left
+                cut_point = Point(
+                    interpolate_points_by_distance(
+                        previous_point, current_point, distance_in_meters=left
+                    )
                 )
-                current_point = Point(interpolated_point_coords)
-            segment.append(current_point)
-            line = shp_LineString(segment)
-            output_linestrings.append(line)
-            previous_point = current_point
-            segment = [current_point]
-            if point == last_point:
-                segment = []
-            distance_accum = 0
-        else:
+                segment.append(cut_point)
+            else:
+                # Less than 1 meter left: close the segment at the previous point.
+                cut_point = previous_point
+            output_linestrings.append(shp_LineString(segment))
+            segment = [cut_point]
+            previous_point = cut_point
+            distance_accum = 0.0
+            distance = point_distance(previous_point, current_point)
+        if distance > 1e-6:
             distance_accum += distance
             previous_point = current_point
             segment.append(current_point)
-    if len(segment) != 0:
+    if len(segment) >= 2:
         output_linestrings.append(shp_LineString(segment))
 
     if len(output_linestrings) >= 2:
         last_line = output_linestrings[-1]
         prev_line = output_linestrings[-2]
-        if last_line.length < 0.75 * distance_threshold:
+        # Merge the last segment into the previous one only if it is shorter
+        # than 0.75 * distance_threshold meters; otherwise keep it on its own.
+        last_length = line_length_in_meters(last_line, distance_algorithm)
+        if last_length < 0.75 * distance_threshold:
             # Create a new LineString concatenating coordinates
             merged_coords = list(prev_line.coords) + list(last_line.coords)[1:]
             output_linestrings[-2] = shp_LineString(merged_coords)
@@ -887,7 +922,7 @@ def normalize_geometry_by_bearing(
     return gdf
 
 
-def process_osm_queries(distance_threshold: float = 500.0, use_fixtures: bool = False):
+def process_osm_queries(distance_threshold: float = SEGMENT_DISTANCE_METERS, use_fixtures: bool = False):
     """Process all the queries in EJES_PRINCIPALES, downloading data from OSM Overpass API,
     or using local fixtures if use_fixtures is True. Segments the shapes by distance_threshold
     """
@@ -925,7 +960,7 @@ def process_osm_queries(distance_threshold: float = 500.0, use_fixtures: bool = 
 def process_shape_data(
     axis_name: str,
     axis: Dict,
-    distance_threshold: float = 500.0,
+    distance_threshold: float = SEGMENT_DISTANCE_METERS,
     flush: bool = True,
 ):
     """
@@ -943,7 +978,9 @@ def process_shape_data(
         )
 
     # Extract features with valid geometry
-    query_data = gpd.GeoDataFrame.from_features(axis, crs="EPSG:4326")
+    query_data = flatten_osm_tags(
+        gpd.GeoDataFrame.from_features(axis, crs="EPSG:4326")
+    )
     # STEP 1: Calculate original bearings
     query_data["original_bearing"] = query_data.geometry.apply(calculate_bearing)
 
@@ -955,7 +992,11 @@ def process_shape_data(
         bearings = []
         lengths = []
         for idx, row in group_gdf.iterrows():
-            b = row.get("original_bearing") or calculate_bearing(row.geometry)
+            # Use "bearing" (set by split_axis_by_direction, flipped for reversed
+            # copies), not "original_bearing", which reversed copies inherit unchanged.
+            b = row.get("bearing")
+            if b is None or pd.isna(b):
+                b = calculate_bearing(row.geometry)
             if b is not None:
                 bearings.append(b)
                 geom_metric = gpd.GeoSeries([row.geometry], crs="EPSG:4326").to_crs(
@@ -1058,7 +1099,7 @@ def process_shape_data(
 
 def process_single_axis(
     axis_name: str,
-    distance_threshold: float = 500.0,
+    distance_threshold: float = SEGMENT_DISTANCE_METERS,
 ):
     """
     Process a single axis without deleting existing data.
@@ -1069,7 +1110,7 @@ def process_single_axis(
     axis_name : str
         Name of the axis to process (must exist in Axles table)
     distance_threshold : float
-        Distance in meters to segment shapes (default: 500.0)
+        Distance in meters to segment shapes (default: SEGMENT_DISTANCE_METERS)
     """
     osm_downloader = OSMDownloader()
 

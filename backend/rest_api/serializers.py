@@ -1,4 +1,5 @@
 from rest_framework import serializers
+from velocity.constants import SEGMENT_DISTANCE_METERS
 
 from rest_api.models import (
     Alert,
@@ -146,4 +147,4 @@ class CameraSerializer(serializers.ModelSerializer):
 
 class ProcessAxisSerializer(serializers.Serializer):
     axis_name = serializers.CharField(max_length=255, required=True)
-    distance_threshold = serializers.FloatField(required=False, default=500.0)
+    distance_threshold = serializers.FloatField(required=False, default=SEGMENT_DISTANCE_METERS)

@@ -1,6 +1,7 @@
 import gzip
 import io
 import json
+from velocity.constants import SEGMENT_DISTANCE_METERS
 import os
 import threading
 from datetime import datetime
@@ -76,7 +77,7 @@ class GeoJSONViewSet(generics.GenericAPIView):
 
     def get(self, request):
         # Returns a GeoJSON with the latest data.
-        # This includes the 500-meter-segmented-path with its corresponding velocities
+        # This includes the segmented path (SEGMENT_DISTANCE_METERS) with its corresponding velocities
         shapes_json = shapes_to_geojson()
 
         return JsonResponse(shapes_json, safe=False)
@@ -880,7 +881,7 @@ class ProcessAxisView(generics.GenericAPIView):
             return JsonResponse({"error": serializer.errors}, status=400)
 
         axis_name = serializer.validated_data["axis_name"]
-        distance_threshold = serializer.validated_data.get("distance_threshold", 500.0)
+        distance_threshold = serializer.validated_data.get("distance_threshold", SEGMENT_DISTANCE_METERS)
 
         try:
             call_command(

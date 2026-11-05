@@ -1,4 +1,5 @@
 from django.core.management.base import BaseCommand
+from velocity.constants import SEGMENT_DISTANCE_METERS
 from processors.osm.process import process_osm_queries
 from rest_api.models import Segment, Shape
 
@@ -10,8 +11,8 @@ class Command(BaseCommand):
         parser.add_argument(
             "--distance_threshold",
             type=float,
-            default=500.0,
-            help="Distance in meters to segment shapes (default: 500.0)",
+            default=SEGMENT_DISTANCE_METERS,
+            help="Distance in meters to segment shapes (default: %(default)s)",
         )
         parser.add_argument(
             "--use_fixtures",
@@ -22,7 +23,7 @@ class Command(BaseCommand):
     def handle(self, *args, **options):
         self.stdout.write("Processing OSM queries...")
 
-        distance_threshold = options.get("distance_threshold", 500.0)
+        distance_threshold = options.get("distance_threshold", SEGMENT_DISTANCE_METERS)
         use_fixtures = options.get("use_fixtures", False)
 
         try:
