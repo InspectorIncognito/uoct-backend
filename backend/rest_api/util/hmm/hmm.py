@@ -178,11 +178,14 @@ def haversine_distance_vectorized(
 
 def haversine_distance(lat1: float, lon1: float, lat2: float, lon2: float) -> float:
     """Calculate great circle distance between two points in meters."""
-    return float(
-        haversine_distance_vectorized(
-            np.array([lat1]), np.array([lon1]), np.array([lat2]), np.array([lon2])
-        )[0]
-    )
+    # Scalar version with math: avoids numpy array overhead on hot paths
+    R = 6371000
+    lat1, lon1, lat2, lon2 = map(math.radians, [lat1, lon1, lat2, lon2])
+    dlat = lat2 - lat1
+    dlon = lon2 - lon1
+    a = math.sin(dlat / 2) ** 2 + math.cos(lat1) * math.cos(lat2) * math.sin(dlon / 2) ** 2
+    c = 2 * math.asin(math.sqrt(a))
+    return R * c
 
 
 def _point_to_line_distance(
@@ -253,6 +256,27 @@ def build_spatial_index(
     return tree, densified_coords_arr, segment_ids_arr, is_geo
 
 
+# id(segment_ids) -> (segment_ids, codes, unique_segment_ids)
+_SEGMENT_CODES_CACHE: Dict[int, Tuple[np.ndarray, np.ndarray, np.ndarray]] = {}
+_SEGMENT_CODES_CACHE_SIZE = 64
+
+
+def _get_segment_codes(segment_ids: np.ndarray) -> Tuple[np.ndarray, np.ndarray]:
+    """
+    Return integer codes for segment_ids and the sorted unique ids they index.
+    Codes keep the sort order of the ids, so unique_ids[np.unique(codes[i])] equals
+    np.unique(segment_ids[i]) without sorting Python objects (UUIDs) on every call.
+    """
+    cached = _SEGMENT_CODES_CACHE.get(id(segment_ids))
+    if cached is None or cached[0] is not segment_ids:
+        unique_ids, codes = np.unique(segment_ids, return_inverse=True)
+        if len(_SEGMENT_CODES_CACHE) >= _SEGMENT_CODES_CACHE_SIZE:
+            _SEGMENT_CODES_CACHE.clear()
+        cached = (segment_ids, codes, unique_ids)
+        _SEGMENT_CODES_CACHE[id(segment_ids)] = cached
+    return cached[1], cached[2]
+
+
 def nearest_edges_optimized(
     gps_point: Point,
     spatial_index: Tuple[cKDTree, np.ndarray, np.ndarray, bool],
@@ -282,7 +306,8 @@ def nearest_edges_optimized(
         dens_indices = [int(i) for i in np.atleast_1d(idxs)]
 
     if len(dens_indices) > 0:
-        candidate_segment_ids = np.unique(segment_ids[dens_indices])
+        codes, unique_ids = _get_segment_codes(segment_ids)
+        candidate_segment_ids = unique_ids[np.unique(codes[dens_indices])]
     else:
         candidate_segment_ids = np.array([], dtype=int)
 

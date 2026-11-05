@@ -27,6 +27,27 @@ if TYPE_CHECKING:
 
 DISTANCE_THRESHOLD = 40  # meters
 
+# id(segments_gdf) -> (segments_gdf, {segment_pk: first row position})
+_SEGMENT_POSITIONS_CACHE: Dict[int, Tuple[gpd.GeoDataFrame, Dict[Any, int]]] = {}
+_SEGMENT_POSITIONS_CACHE_SIZE = 64
+
+
+def _get_segment_row(segments_gdf: gpd.GeoDataFrame, segment_pk) -> Optional[pd.Series]:
+    """Return the first row of segments_gdf with the given segment_pk, or None."""
+    cached = _SEGMENT_POSITIONS_CACHE.get(id(segments_gdf))
+    if cached is None or cached[0] is not segments_gdf:
+        positions = {}
+        for position, pk in enumerate(segments_gdf["segment_pk"]):
+            positions.setdefault(pk, position)
+        if len(_SEGMENT_POSITIONS_CACHE) >= _SEGMENT_POSITIONS_CACHE_SIZE:
+            _SEGMENT_POSITIONS_CACHE.clear()
+        cached = (segments_gdf, positions)
+        _SEGMENT_POSITIONS_CACHE[id(segments_gdf)] = cached
+    position = cached[1].get(segment_pk)
+    if position is None:
+        return None
+    return segments_gdf.iloc[position]
+
 
 # =============================================================================
 # PARALLEL HMM MAP MATCHING - DATA STRUCTURES AND WORKER FUNCTION
@@ -82,6 +103,22 @@ def _get_num_workers() -> int:
         if available_cpus <= 2:
             return available_cpus
         return min(max(1, available_cpus - 1), 8)
+
+
+# Read-only data shared with the HMM workers. It is set once per worker by the Pool
+# initializer, so the (large) segment caches are not pickled for every expedition.
+_HMM_WORKER_SHARED: Optional[Tuple[Any, ...]] = None
+
+
+def _init_hmm_worker(shared: Tuple[Any, ...]):
+    global _HMM_WORKER_SHARED
+    _HMM_WORKER_SHARED = shared
+
+
+def _run_hmm_for_shared_expedition(
+    expedition_input: ExpeditionHMMInput,
+) -> ExpeditionHMMResult:
+    return _run_hmm_for_single_expedition((expedition_input, *_HMM_WORKER_SHARED))
 
 
 def _run_hmm_for_single_expedition(
@@ -608,9 +645,9 @@ class GridManager(Dict[Tuple[int, int], GridCell]):
         for idx in valid_indices:
             seg_pk = matched_segments[idx]
             if seg_pk is not None:
-                row = segments_gdf[segments_gdf.segment_pk == seg_pk]
-                if not row.empty:
-                    shape_pk = row.iloc[0]["shape_pk"]
+                row = _get_segment_row(segments_gdf, seg_pk)
+                if row is not None:
+                    shape_pk = row["shape_pk"]
                     if shape_pk not in shape_pks:
                         shape_pks[shape_pk] = ([], [])
                     shape_pks[shape_pk][0].append(idx)
@@ -683,11 +720,10 @@ class GridManager(Dict[Tuple[int, int], GridCell]):
         float or None
             Distancia acumulada o None si no se encuentra el segmento.
         """
-        segment_row = segments_gdf[segments_gdf.segment_pk == segment_pk]
-        if segment_row.empty:
+        segment_row = _get_segment_row(segments_gdf, segment_pk)
+        if segment_row is None:
             return None
 
-        segment_row = segment_row.iloc[0]
         distance_to_segment_start = segment_row.get("distance_start", 0)
         segment_geom = segment_row.geometry
         coords = list(segment_geom.coords)
@@ -1059,18 +1095,14 @@ class GridManager(Dict[Tuple[int, int], GridCell]):
             "bearing_weight_factor": bearing_weight_factor,
         }
 
-        # Prepare worker arguments (each expedition gets full cache references)
-        worker_args = [
-            (
-                exp_input,
-                segments_gdfs,
-                self.shape_manager.spatial_indices,
-                self.shape_manager.direction_caches,
-                self.shape_manager.segment_caches,
-                hmm_params,
-            )
-            for exp_input in all_expeditions
-        ]
+        # Shared caches are sent once per worker instead of once per expedition
+        worker_shared = (
+            segments_gdfs,
+            self.shape_manager.spatial_indices,
+            self.shape_manager.direction_caches,
+            self.shape_manager.segment_caches,
+            hmm_params,
+        )
 
         if verbose:
             print(f"Starting parallel HMM processing with {num_workers} workers...")
@@ -1081,8 +1113,12 @@ class GridManager(Dict[Tuple[int, int], GridCell]):
         # Use 'spawn' on Windows to avoid pickle issues with fork
         # On Linux, fork is used automatically and is more efficient
         try:
-            with Pool(processes=num_workers) as pool:
-                results = pool.map(_run_hmm_for_single_expedition, worker_args)
+            with Pool(
+                processes=num_workers,
+                initializer=_init_hmm_worker,
+                initargs=(worker_shared,),
+            ) as pool:
+                results = pool.map(_run_hmm_for_shared_expedition, all_expeditions)
         except Exception as e:
             print(f"Parallel processing failed: {e}")
             print("Falling back to serial processing...")
