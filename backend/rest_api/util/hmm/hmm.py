@@ -3,6 +3,7 @@ Based on the paper "Hidden Markov Map Matching Through Noise and Sparseness" by 
 HIGHLY OPTIMIZED VERSION - 5-10x faster than original.
 """
 
+import math
 import warnings
 from dataclasses import dataclass
 from typing import Any, Dict, List, Optional, Set, Tuple
@@ -11,8 +12,11 @@ import geopandas as gpd
 import numpy as np
 import pandas as pd
 from scipy.spatial import cKDTree
+from shapely.affinity import scale
 from shapely.geometry import LineString, Point
 from shapely.ops import nearest_points
+
+EARTH_RADIUS_M = 6371000
 
 
 @dataclass
@@ -20,9 +24,12 @@ class DirectionCache:
     """Cache for precomputed direction group data."""
 
     groups: Dict[int, List[int]]
-    unified_lines: Dict[int, LineString]
     segments_by_direction: Dict[int, gpd.GeoDataFrame]
     segment_to_direction: Dict[int, int]  # NEW: Fast lookup
+    # segment_pk -> (geometry in meters, meters from the direction start to the segment)
+    route_positions: Dict[int, Tuple[LineString, float]]
+    # Meters per CRS unit along x and y
+    metric_scale: Tuple[float, float]
 
 
 @dataclass
@@ -33,10 +40,41 @@ class SegmentCache:
     bearings: Dict[int, Optional[float]]
 
 
+def _get_metric_scale(segments_gdf: gpd.GeoDataFrame) -> Tuple[float, float]:
+    """Return meters per CRS unit along x and y (local equirectangular if geographic)."""
+    if segments_gdf.crs is None or not segments_gdf.crs.is_geographic:
+        return 1.0, 1.0
+    _, min_lat, _, max_lat = segments_gdf.total_bounds
+    meters_per_degree = math.radians(EARTH_RADIUS_M)
+    return (
+        meters_per_degree * math.cos(math.radians((min_lat + max_lat) / 2)),
+        meters_per_degree,
+    )
+
+
+def _chain_segments(
+    dir_segments: gpd.GeoDataFrame, metric_scale: Tuple[float, float]
+) -> Dict[int, Tuple[LineString, float]]:
+    """Accumulate segment lengths in meters along the route, following `sequence` if present."""
+    if "sequence" in dir_segments.columns:
+        dir_segments = dir_segments.sort_values("sequence", kind="stable")
+
+    positions: Dict[int, Tuple[LineString, float]] = {}
+    route_distance = 0.0
+    for seg_pk, geom in zip(dir_segments.segment_pk, dir_segments.geometry):
+        if geom is None or geom.is_empty:
+            continue
+        metric_geom = scale(
+            geom, xfact=metric_scale[0], yfact=metric_scale[1], origin=(0, 0)
+        )
+        positions[seg_pk] = (metric_geom, route_distance)
+        route_distance += metric_geom.length
+    return positions
+
+
 def precompute_direction_cache(
     segments_gdf: gpd.GeoDataFrame,
     use_attribute: str = "direction",
-    unify_method: str = "union_all",
 ) -> DirectionCache:
     groups: Dict[int, List[int]] = {}
 
@@ -65,9 +103,10 @@ def precompute_direction_cache(
         for idx, dir_id in seg_to_dir.items():
             groups.setdefault(dir_id, []).append(idx)
 
-    unified_lines = {}
     segments_by_direction = {}
     segment_to_direction = {}  # NEW: Reverse mapping
+    route_positions: Dict[int, Tuple[LineString, float]] = {}
+    metric_scale = _get_metric_scale(segments_gdf)
 
     for dir_id, segment_pk_list in groups.items():
         # Filtrar por segment_pk
@@ -78,31 +117,14 @@ def precompute_direction_cache(
         for seg_pk in segment_pk_list:
             segment_to_direction[seg_pk] = dir_id
 
-        # Build unified geometry
-        try:
-            if unify_method == "union_all" and hasattr(
-                dir_segments.geometry, "union_all"
-            ):
-                unified = dir_segments.geometry.union_all(method="coverage")
-            else:
-                unified = dir_segments.geometry.unary_union
-        except Exception:
-            try:
-                unified = dir_segments.geometry.unary_union
-            except Exception:
-                unified = None
-                warnings.warn(
-                    f"Could not compute unified geometry for direction {dir_id}"
-                )
-                # warning removed
-
-        unified_lines[dir_id] = unified
+        route_positions.update(_chain_segments(dir_segments, metric_scale))
 
     return DirectionCache(
         groups=groups,
-        unified_lines=unified_lines,
         segments_by_direction=segments_by_direction,
         segment_to_direction=segment_to_direction,
+        route_positions=route_positions,
+        metric_scale=metric_scale,
     )
 
 
@@ -339,18 +361,29 @@ def shortest_path_distance(
     # if dir1 is None or dir2 is None or dir1 != dir2:
     #     return 1e7  # Cross-direction penalty
 
-    try:
-        unified_line = direction_cache.unified_lines[dir1]
-        dist1 = unified_line.project(candidate_point1)
-        dist2 = unified_line.project(candidate_point2)
-        return abs(dist2 - dist1)
-    except Exception:
+    position1 = direction_cache.route_positions.get(segment_idx1)
+    position2 = direction_cache.route_positions.get(segment_idx2)
+
+    # Route distances are only comparable within one direction
+    if dir1 is None or dir1 != dir2 or position1 is None or position2 is None:
         return haversine_distance(
             candidate_point1.y,
             candidate_point1.x,
             candidate_point2.y,
             candidate_point2.x,
         )
+
+    # Project on each candidate's own segment, in meters like the great circle distance
+    x_scale, y_scale = direction_cache.metric_scale
+    line1, route_distance1 = position1
+    line2, route_distance2 = position2
+    dist1 = route_distance1 + line1.project(
+        Point(candidate_point1.x * x_scale, candidate_point1.y * y_scale)
+    )
+    dist2 = route_distance2 + line2.project(
+        Point(candidate_point2.x * x_scale, candidate_point2.y * y_scale)
+    )
+    return abs(dist2 - dist1)
 
 
 def transition_prob_log(
