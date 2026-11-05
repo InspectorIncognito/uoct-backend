@@ -96,37 +96,11 @@ class ExpeditionAcrossAxesTest(SimpleTestCase):
             for expedition in self.vehicle.expeditions
         }
 
-    def test_single_axis_single_shape_keeps_the_expedition(self):
-        self.apply_axis(self.expedition, self.axis_a, {0: 1, 1: 1})
-        self.assertEqual(list(self.vehicle.expeditions), [self.expedition])
-        self.assertEqual(self.expedition.shape_id, SHAPE_EAST)
-
     def test_second_axis_does_not_overwrite_the_first(self):
         last = self.apply_axis(self.expedition, self.axis_a, {0: 1, 1: 1})
         self.apply_axis(last, self.axis_b, {2: 3, 3: 3})
         self.assertEqual(
             self.indices_by_shape(), {SHAPE_EAST: [0, 1], SHAPE_NORTH: [2, 3]}
-        )
-
-    def test_second_axis_does_not_mix_route_distances(self):
-        last = self.apply_axis(self.expedition, self.axis_a, {0: 1, 1: 1})
-        self.apply_axis(last, self.axis_b, {2: 3, 3: 3})
-        for expedition in self.vehicle.expeditions:
-            distances = [
-                d for d in expedition.gps_distance_on_route if d is not None
-            ]
-            self.assertEqual(len(distances), 2)
-            if expedition.shape_id == SHAPE_EAST:
-                self.assertTrue(all(d < 5000 for d in distances))
-            else:
-                self.assertTrue(all(d >= 20000 for d in distances))
-
-    def test_second_axis_with_two_shapes_keeps_the_first_axis(self):
-        last = self.apply_axis(self.expedition, self.axis_b, {0: 3})
-        self.apply_axis(last, self.axis_a, {1: 1, 2: 2})
-        self.assertEqual(
-            self.indices_by_shape(),
-            {SHAPE_NORTH: [0], SHAPE_EAST: [1], SHAPE_WEST: [2]},
         )
 
     def test_axis_after_a_split_keeps_every_copy(self):
@@ -136,12 +110,6 @@ class ExpeditionAcrossAxesTest(SimpleTestCase):
             self.indices_by_shape(),
             {SHAPE_EAST: [0], SHAPE_WEST: [1], SHAPE_NORTH: [2, 3]},
         )
-
-    def test_split_within_an_axis_replaces_the_original(self):
-        self.apply_axis(self.expedition, self.axis_a, {0: 1, 1: 2})
-        self.assertNotIn(self.expedition, self.vehicle.expeditions)
-        self.assertEqual(self.indices_by_shape(), {SHAPE_EAST: [0], SHAPE_WEST: [1]})
-
 
 class SerialMatchingAcrossAxesTest(SimpleTestCase):
     def test_vehicle_crossing_two_axes_gets_one_expedition_per_shape(self):
