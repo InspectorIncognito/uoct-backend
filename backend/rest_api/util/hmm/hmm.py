@@ -26,8 +26,8 @@ class DirectionCache:
     groups: Dict[int, List[int]]
     segments_by_direction: Dict[int, gpd.GeoDataFrame]
     segment_to_direction: Dict[int, int]  # NEW: Fast lookup
-    # segment_pk -> (geometry in meters, meters from the direction start to the segment)
-    route_positions: Dict[int, Tuple[LineString, float]]
+    # segment_pk -> (geometry in meters, meters from the shape start to the segment, shape_pk)
+    route_positions: Dict[int, Tuple[LineString, float, Any]]
     # Meters per CRS unit along x and y
     metric_scale: Tuple[float, float]
 
@@ -54,21 +54,32 @@ def _get_metric_scale(segments_gdf: gpd.GeoDataFrame) -> Tuple[float, float]:
 
 def _chain_segments(
     dir_segments: gpd.GeoDataFrame, metric_scale: Tuple[float, float]
-) -> Dict[int, Tuple[LineString, float]]:
-    """Accumulate segment lengths in meters along the route, following `sequence` if present."""
-    if "sequence" in dir_segments.columns:
-        dir_segments = dir_segments.sort_values("sequence", kind="stable")
+) -> Dict[int, Tuple[LineString, float, Any]]:
+    """
+    Accumulate segment lengths in meters along each shape, following `sequence` if present.
+    Each shape has its own chain, so segments of shapes sharing a direction never interleave.
+    """
+    has_shape = "shape_pk" in dir_segments.columns
+    sort_columns = [
+        column for column in ("shape_pk", "sequence") if column in dir_segments.columns
+    ]
+    if sort_columns:
+        dir_segments = dir_segments.sort_values(sort_columns, kind="stable")
+    shapes = dir_segments.shape_pk if has_shape else [None] * len(dir_segments)
 
-    positions: Dict[int, Tuple[LineString, float]] = {}
-    route_distance = 0.0
-    for seg_pk, geom in zip(dir_segments.segment_pk, dir_segments.geometry):
+    positions: Dict[int, Tuple[LineString, float, Any]] = {}
+    route_distances: Dict[Any, float] = {}
+    for seg_pk, shape_pk, geom in zip(
+        dir_segments.segment_pk, shapes, dir_segments.geometry
+    ):
         if geom is None or geom.is_empty:
             continue
         metric_geom = scale(
             geom, xfact=metric_scale[0], yfact=metric_scale[1], origin=(0, 0)
         )
-        positions[seg_pk] = (metric_geom, route_distance)
-        route_distance += metric_geom.length
+        route_distance = route_distances.get(shape_pk, 0.0)
+        positions[seg_pk] = (metric_geom, route_distance, shape_pk)
+        route_distances[shape_pk] = route_distance + metric_geom.length
     return positions
 
 
@@ -179,13 +190,13 @@ def haversine_distance_vectorized(
 def haversine_distance(lat1: float, lon1: float, lat2: float, lon2: float) -> float:
     """Calculate great circle distance between two points in meters."""
     # Scalar version with math: avoids numpy array overhead on hot paths
-    R = 6371000
     lat1, lon1, lat2, lon2 = map(math.radians, [lat1, lon1, lat2, lon2])
     dlat = lat2 - lat1
     dlon = lon2 - lon1
     a = math.sin(dlat / 2) ** 2 + math.cos(lat1) * math.cos(lat2) * math.sin(dlon / 2) ** 2
-    c = 2 * math.asin(math.sqrt(a))
-    return R * c
+    # Rounding can push a slightly above 1, outside the domain of asin
+    c = 2 * math.asin(math.sqrt(min(1.0, a)))
+    return EARTH_RADIUS_M * c
 
 
 def _point_to_line_distance(
@@ -389,8 +400,14 @@ def shortest_path_distance(
     position1 = direction_cache.route_positions.get(segment_idx1)
     position2 = direction_cache.route_positions.get(segment_idx2)
 
-    # Route distances are only comparable within one direction
-    if dir1 is None or dir1 != dir2 or position1 is None or position2 is None:
+    # Route distances are only comparable within one direction and one shape
+    if (
+        dir1 is None
+        or dir1 != dir2
+        or position1 is None
+        or position2 is None
+        or position1[2] != position2[2]
+    ):
         return haversine_distance(
             candidate_point1.y,
             candidate_point1.x,
@@ -400,8 +417,8 @@ def shortest_path_distance(
 
     # Project on each candidate's own segment, in meters like the great circle distance
     x_scale, y_scale = direction_cache.metric_scale
-    line1, route_distance1 = position1
-    line2, route_distance2 = position2
+    line1, route_distance1, _ = position1
+    line2, route_distance2, _ = position2
     dist1 = route_distance1 + line1.project(
         Point(candidate_point1.x * x_scale, candidate_point1.y * y_scale)
     )
