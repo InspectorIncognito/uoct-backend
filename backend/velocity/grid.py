@@ -587,6 +587,9 @@ class GridManager(Dict[Tuple[int, int], GridCell]):
         Determina el shape_pk de los segmentos matcheados. Si hay más de un shape_pk,
         crea una expedición por cada shape_pk.
 
+        Una expedición guarda distancias de un solo shape: si ya tiene shape_pk asignado por
+        otro eje, se conserva y los nuevos shape_pk van en expediciones separadas.
+
         Parameters
         ----------
         matched_segments : List[Optional[int]]
@@ -616,7 +619,9 @@ class GridManager(Dict[Tuple[int, int], GridCell]):
         if not shape_pks:
             return None
 
-        if len(shape_pks) == 1:
+        already_assigned = expedition.shape_id is not None
+
+        if len(shape_pks) == 1 and not already_assigned:
             expedition.shape_id = next(iter(shape_pks))
             return {
                 expedition: (
@@ -630,7 +635,8 @@ class GridManager(Dict[Tuple[int, int], GridCell]):
         # This can happen if a previous axis already split this expedition
         if expedition not in vehicle_data.expeditions:
             return None
-        vehicle_data.expeditions.pop(expedition)
+        if not already_assigned:
+            vehicle_data.expeditions.pop(expedition)
         new_set = {}
         for shape_pk, (idxs, seg_pks) in shape_pks.items():
             expedition_copy = ExpeditionData(
