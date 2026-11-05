@@ -3,6 +3,7 @@ Based on the paper "Hidden Markov Map Matching Through Noise and Sparseness" by 
 HIGHLY OPTIMIZED VERSION - 5-10x faster than original.
 """
 
+import math
 import warnings
 from dataclasses import dataclass
 from typing import Any, Dict, List, Optional, Set, Tuple
@@ -11,8 +12,11 @@ import geopandas as gpd
 import numpy as np
 import pandas as pd
 from scipy.spatial import cKDTree
+from shapely.affinity import scale
 from shapely.geometry import LineString, Point
 from shapely.ops import nearest_points
+
+EARTH_RADIUS_M = 6371000
 
 
 @dataclass
@@ -20,9 +24,12 @@ class DirectionCache:
     """Cache for precomputed direction group data."""
 
     groups: Dict[int, List[int]]
-    unified_lines: Dict[int, LineString]
     segments_by_direction: Dict[int, gpd.GeoDataFrame]
     segment_to_direction: Dict[int, int]  # NEW: Fast lookup
+    # segment_pk -> (geometry in meters, meters from the shape start to the segment, shape_pk)
+    route_positions: Dict[int, Tuple[LineString, float, Any]]
+    # Meters per CRS unit along x and y
+    metric_scale: Tuple[float, float]
 
 
 @dataclass
@@ -33,10 +40,52 @@ class SegmentCache:
     bearings: Dict[int, Optional[float]]
 
 
+def _get_metric_scale(segments_gdf: gpd.GeoDataFrame) -> Tuple[float, float]:
+    """Return meters per CRS unit along x and y (local equirectangular if geographic)."""
+    if segments_gdf.crs is None or not segments_gdf.crs.is_geographic:
+        return 1.0, 1.0
+    _, min_lat, _, max_lat = segments_gdf.total_bounds
+    meters_per_degree = math.radians(EARTH_RADIUS_M)
+    return (
+        meters_per_degree * math.cos(math.radians((min_lat + max_lat) / 2)),
+        meters_per_degree,
+    )
+
+
+def _chain_segments(
+    dir_segments: gpd.GeoDataFrame, metric_scale: Tuple[float, float]
+) -> Dict[int, Tuple[LineString, float, Any]]:
+    """
+    Accumulate segment lengths in meters along each shape, following `sequence` if present.
+    Each shape has its own chain, so segments of shapes sharing a direction never interleave.
+    """
+    has_shape = "shape_pk" in dir_segments.columns
+    sort_columns = [
+        column for column in ("shape_pk", "sequence") if column in dir_segments.columns
+    ]
+    if sort_columns:
+        dir_segments = dir_segments.sort_values(sort_columns, kind="stable")
+    shapes = dir_segments.shape_pk if has_shape else [None] * len(dir_segments)
+
+    positions: Dict[int, Tuple[LineString, float, Any]] = {}
+    route_distances: Dict[Any, float] = {}
+    for seg_pk, shape_pk, geom in zip(
+        dir_segments.segment_pk, shapes, dir_segments.geometry
+    ):
+        if geom is None or geom.is_empty:
+            continue
+        metric_geom = scale(
+            geom, xfact=metric_scale[0], yfact=metric_scale[1], origin=(0, 0)
+        )
+        route_distance = route_distances.get(shape_pk, 0.0)
+        positions[seg_pk] = (metric_geom, route_distance, shape_pk)
+        route_distances[shape_pk] = route_distance + metric_geom.length
+    return positions
+
+
 def precompute_direction_cache(
     segments_gdf: gpd.GeoDataFrame,
     use_attribute: str = "direction",
-    unify_method: str = "union_all",
 ) -> DirectionCache:
     groups: Dict[int, List[int]] = {}
 
@@ -65,9 +114,10 @@ def precompute_direction_cache(
         for idx, dir_id in seg_to_dir.items():
             groups.setdefault(dir_id, []).append(idx)
 
-    unified_lines = {}
     segments_by_direction = {}
     segment_to_direction = {}  # NEW: Reverse mapping
+    route_positions: Dict[int, Tuple[LineString, float]] = {}
+    metric_scale = _get_metric_scale(segments_gdf)
 
     for dir_id, segment_pk_list in groups.items():
         # Filtrar por segment_pk
@@ -78,31 +128,14 @@ def precompute_direction_cache(
         for seg_pk in segment_pk_list:
             segment_to_direction[seg_pk] = dir_id
 
-        # Build unified geometry
-        try:
-            if unify_method == "union_all" and hasattr(
-                dir_segments.geometry, "union_all"
-            ):
-                unified = dir_segments.geometry.union_all(method="coverage")
-            else:
-                unified = dir_segments.geometry.unary_union
-        except Exception:
-            try:
-                unified = dir_segments.geometry.unary_union
-            except Exception:
-                unified = None
-                warnings.warn(
-                    f"Could not compute unified geometry for direction {dir_id}"
-                )
-                # warning removed
-
-        unified_lines[dir_id] = unified
+        route_positions.update(_chain_segments(dir_segments, metric_scale))
 
     return DirectionCache(
         groups=groups,
-        unified_lines=unified_lines,
         segments_by_direction=segments_by_direction,
         segment_to_direction=segment_to_direction,
+        route_positions=route_positions,
+        metric_scale=metric_scale,
     )
 
 
@@ -156,11 +189,14 @@ def haversine_distance_vectorized(
 
 def haversine_distance(lat1: float, lon1: float, lat2: float, lon2: float) -> float:
     """Calculate great circle distance between two points in meters."""
-    return float(
-        haversine_distance_vectorized(
-            np.array([lat1]), np.array([lon1]), np.array([lat2]), np.array([lon2])
-        )[0]
-    )
+    # Scalar version with math: avoids numpy array overhead on hot paths
+    lat1, lon1, lat2, lon2 = map(math.radians, [lat1, lon1, lat2, lon2])
+    dlat = lat2 - lat1
+    dlon = lon2 - lon1
+    a = math.sin(dlat / 2) ** 2 + math.cos(lat1) * math.cos(lat2) * math.sin(dlon / 2) ** 2
+    # Rounding can push a slightly above 1, outside the domain of asin
+    c = 2 * math.asin(math.sqrt(min(1.0, a)))
+    return EARTH_RADIUS_M * c
 
 
 def _point_to_line_distance(
@@ -231,6 +267,27 @@ def build_spatial_index(
     return tree, densified_coords_arr, segment_ids_arr, is_geo
 
 
+# id(segment_ids) -> (segment_ids, codes, unique_segment_ids)
+_SEGMENT_CODES_CACHE: Dict[int, Tuple[np.ndarray, np.ndarray, np.ndarray]] = {}
+_SEGMENT_CODES_CACHE_SIZE = 64
+
+
+def _get_segment_codes(segment_ids: np.ndarray) -> Tuple[np.ndarray, np.ndarray]:
+    """
+    Return integer codes for segment_ids and the sorted unique ids they index.
+    Codes keep the sort order of the ids, so unique_ids[np.unique(codes[i])] equals
+    np.unique(segment_ids[i]) without sorting Python objects (UUIDs) on every call.
+    """
+    cached = _SEGMENT_CODES_CACHE.get(id(segment_ids))
+    if cached is None or cached[0] is not segment_ids:
+        unique_ids, codes = np.unique(segment_ids, return_inverse=True)
+        if len(_SEGMENT_CODES_CACHE) >= _SEGMENT_CODES_CACHE_SIZE:
+            _SEGMENT_CODES_CACHE.clear()
+        cached = (segment_ids, codes, unique_ids)
+        _SEGMENT_CODES_CACHE[id(segment_ids)] = cached
+    return cached[1], cached[2]
+
+
 def nearest_edges_optimized(
     gps_point: Point,
     spatial_index: Tuple[cKDTree, np.ndarray, np.ndarray, bool],
@@ -260,7 +317,8 @@ def nearest_edges_optimized(
         dens_indices = [int(i) for i in np.atleast_1d(idxs)]
 
     if len(dens_indices) > 0:
-        candidate_segment_ids = np.unique(segment_ids[dens_indices])
+        codes, unique_ids = _get_segment_codes(segment_ids)
+        candidate_segment_ids = unique_ids[np.unique(codes[dens_indices])]
     else:
         candidate_segment_ids = np.array([], dtype=int)
 
@@ -339,18 +397,35 @@ def shortest_path_distance(
     # if dir1 is None or dir2 is None or dir1 != dir2:
     #     return 1e7  # Cross-direction penalty
 
-    try:
-        unified_line = direction_cache.unified_lines[dir1]
-        dist1 = unified_line.project(candidate_point1)
-        dist2 = unified_line.project(candidate_point2)
-        return abs(dist2 - dist1)
-    except Exception:
+    position1 = direction_cache.route_positions.get(segment_idx1)
+    position2 = direction_cache.route_positions.get(segment_idx2)
+
+    # Route distances are only comparable within one direction and one shape
+    if (
+        dir1 is None
+        or dir1 != dir2
+        or position1 is None
+        or position2 is None
+        or position1[2] != position2[2]
+    ):
         return haversine_distance(
             candidate_point1.y,
             candidate_point1.x,
             candidate_point2.y,
             candidate_point2.x,
         )
+
+    # Project on each candidate's own segment, in meters like the great circle distance
+    x_scale, y_scale = direction_cache.metric_scale
+    line1, route_distance1, _ = position1
+    line2, route_distance2, _ = position2
+    dist1 = route_distance1 + line1.project(
+        Point(candidate_point1.x * x_scale, candidate_point1.y * y_scale)
+    )
+    dist2 = route_distance2 + line2.project(
+        Point(candidate_point2.x * x_scale, candidate_point2.y * y_scale)
+    )
+    return abs(dist2 - dist1)
 
 
 def transition_prob_log(
