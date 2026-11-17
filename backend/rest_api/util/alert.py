@@ -8,7 +8,12 @@ from zoneinfo import ZoneInfo
 import requests
 from decouple import config
 from django.utils import timezone
-from gtfs_rt.utils import get_day_type, get_last_temporal_range, get_temporal_segment
+from gtfs_rt.utils import (
+    get_day_bounds,
+    get_day_type,
+    get_last_temporal_range,
+    get_temporal_segment,
+)
 from velocity.constants import TEMPORAL_SEGMENT_SECONDS
 from rest_api.models import Alert, AlertThreshold, HistoricSpeed, Segment, Speed
 
@@ -265,9 +270,11 @@ def create_alerts(start_time: datetime = None, end_time: datetime = None):
 
     # Two queries for every segment instead of two per segment. Ordering by pk/timestamp
     # and keeping the first row per segment matches the previous .first() lookups.
+    day_start, day_end = get_day_bounds(start_time)
     speeds_by_segment = {}
     for speed_obj in Speed.objects.filter(
-        timestamp__date=start_time.date(),
+        timestamp__gte=day_start,
+        timestamp__lt=day_end,
         temporal_segment=temporal_segment,
     ).order_by("pk"):
         speeds_by_segment.setdefault(speed_obj.segment_id, speed_obj)

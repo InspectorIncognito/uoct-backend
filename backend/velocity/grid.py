@@ -7,6 +7,7 @@ from multiprocessing import Pool, cpu_count
 from typing import TYPE_CHECKING, Any, Dict, List, Optional, Tuple
 
 import geopandas as gpd
+import numpy as np
 import pandas as pd
 from django.conf import settings
 from django.utils import timezone
@@ -15,7 +16,7 @@ from gtfs_rt.services import get_gps_data_from_last_15_minutes
 from processors.geometry.line import PolylineSegment
 from processors.geometry.point import Point
 from rest_api.models import Segment
-from rest_api.util.hmm.hmm import haversine_distance, viterbi
+from rest_api.util.hmm.hmm import haversine_distance, observations_near_axis, viterbi
 from rest_api.util.shape import ShapeManager
 from shapely.geometry import LineString as shp_LineString
 from shapely.geometry import Point as shp_Point
@@ -64,6 +65,8 @@ class ExpeditionHMMInput:
     gps_coords: List[Tuple[float, float]]  # (longitude, latitude) pairs
     gps_bearings: List[Optional[float]]
     gps_timestamps: List[Any]  # Preserved for reconstruction
+    # axis_id -> mask of the pulses near that axis; unlisted axes are skipped
+    near_axis: Optional[Dict[str, np.ndarray]] = None
 
 
 @dataclass
@@ -86,23 +89,15 @@ def _get_num_workers() -> int:
     hmm_workers_setting = getattr(settings, "HMM_NUM_WORKERS", "auto")
 
     if hmm_workers_setting == "auto" or hmm_workers_setting is None:
-        # Auto-detect:
-        # - Small instances (<=2 vCPU): use all CPUs
-        # - Larger instances: keep one CPU available for system/DB/network tasks
-        available_cpus = cpu_count() or 2
-        if available_cpus <= 2:
-            return available_cpus
-        return min(max(1, available_cpus - 1), 8)
+        # Auto-detect: keep one CPU available for system/DB/network tasks
+        return min(max(1, (cpu_count() or 2) - 1), 8)
 
     try:
         num_workers = int(hmm_workers_setting)
         return max(1, num_workers)
     except (ValueError, TypeError):
         # Fallback to auto-detect
-        available_cpus = cpu_count() or 2
-        if available_cpus <= 2:
-            return available_cpus
-        return min(max(1, available_cpus - 1), 8)
+        return min(max(1, (cpu_count() or 2) - 1), 8)
 
 
 # Read-only data shared with the HMM workers. It is set once per worker by the Pool
@@ -166,12 +161,19 @@ def _run_hmm_for_single_expedition(
         matched_axes = {}
         excluded_indices = set()
 
+        near_axis = expedition_input.near_axis
         for axis_id in segments_gdfs.keys():
+            axis_near = None
+            if near_axis is not None:
+                axis_near = near_axis.get(axis_id)
+                if axis_near is None:
+                    continue  # no pulse of this expedition is near the axis
             matched_segments, valid_indices, projected_points = viterbi(
                 trajectory,
                 direction_caches[axis_id],
                 spatial_indices[axis_id],
                 segment_caches[axis_id],
+                near_axis=axis_near,
                 max_distance=hmm_params.get("max_distance", 40),
                 sigma=hmm_params.get("sigma", 25),
                 beta=hmm_params.get("beta", 40),
@@ -812,6 +814,38 @@ class GridManager(Dict[Tuple[int, int], GridCell]):
                     print(f"Error processing GPS point {idx}: {e}")
                     continue
 
+    def _near_axis_by_expedition(
+        self, expeditions: List[ExpeditionData], max_distance: float
+    ) -> Dict[Any, Dict[str, np.ndarray]]:
+        """expedition.id -> {axis_id: mask of its pulses near that axis}, only for the axes
+        with a pulse near. One KD-tree query per axis for the pulses of all expeditions."""
+        counts = [len(expedition.gps_points) for expedition in expeditions]
+        if not sum(counts):
+            return {expedition.id: {} for expedition in expeditions}
+        coords = np.array(
+            [
+                (gps_point.longitude, gps_point.latitude)
+                for expedition in expeditions
+                for gps_point in expedition.gps_points
+            ],
+            dtype=float,
+        )
+        offsets = np.concatenate(([0], np.cumsum(counts)))
+        masks = {
+            axis_id: observations_near_axis(coords, spatial_index, max_distance)
+            for axis_id, spatial_index in self.shape_manager.spatial_indices.items()
+        }
+        result = {}
+        for index, expedition in enumerate(expeditions):
+            start, end = offsets[index], offsets[index + 1]
+            expedition_masks = {}
+            for axis_id, mask in masks.items():
+                expedition_mask = mask[start:end]
+                if expedition_mask.any():
+                    expedition_masks[axis_id] = expedition_mask
+            result[expedition.id] = expedition_masks
+        return result
+
     def run_hmm_map_matching(
         self,
         vm: VehicleManager,
@@ -865,6 +899,14 @@ class GridManager(Dict[Tuple[int, int], GridCell]):
         self.shape_manager.shapes_cache(segments_gdfs=segments_gdfs)
 
         vehicle_data_values = list(vm.vehicles.values())
+        near_axis_masks = self._near_axis_by_expedition(
+            [
+                expedition
+                for vehicle_data in vehicle_data_values
+                for expedition in vehicle_data.expeditions.values()
+            ],
+            max_distance,
+        )
         segments_cnt = set()
         for vehicle_data in vehicle_data_values:
             expeditions = list(vehicle_data.expeditions.values())
@@ -874,13 +916,18 @@ class GridManager(Dict[Tuple[int, int], GridCell]):
                     for gps_point in expedition.gps_points
                 ]
                 bearings = [gps_point.bearing for gps_point in expedition.gps_points]
+                expedition_near_axis = near_axis_masks[expedition.id]
                 excluded_indices = set()
                 for axis_id in segments_gdfs.keys():
+                    axis_near = expedition_near_axis.get(axis_id)
+                    if axis_near is None:
+                        continue  # no pulse of this expedition is near the axis
                     matched_segments, valid_indices, projected_points = viterbi(
                         trajectory,
                         self.shape_manager.direction_caches[axis_id],
                         self.shape_manager.spatial_indices[axis_id],
                         self.shape_manager.segment_caches[axis_id],
+                        near_axis=axis_near,
                         max_distance=max_distance,
                         sigma=sigma,
                         beta=beta,
@@ -1002,6 +1049,32 @@ class GridManager(Dict[Tuple[int, int], GridCell]):
         if num_workers is None:
             num_workers = _get_num_workers()
 
+        # Decide before building the caches: the serial path builds its own
+        total_expeditions = sum(
+            1
+            for vehicle_data in vm.vehicles.values()
+            for expedition in vehicle_data.expeditions.values()
+            if len(expedition.gps_points) >= 2
+        )
+        if verbose:
+            print(f"Preparing {total_expeditions} expeditions for HMM map matching...")
+            print(f"  Workers: {num_workers}, Min for parallel: {min_expeditions}")
+
+        if total_expeditions < min_expeditions or num_workers <= 1:
+            if verbose:
+                print(
+                    f"Using serial processing (expeditions={total_expeditions}, workers={num_workers})"
+                )
+            return self.run_hmm_map_matching(
+                vm,
+                max_distance,
+                sigma,
+                beta,
+                min_candidates,
+                sigma_bearing,
+                bearing_weight_factor,
+            )
+
         # Step 1: Prepare segments GeoDataFrames with cumulative distances
         segments_gdfs: Dict[str, gpd.GeoDataFrame] = (
             self.shape_manager.get_segments_gdf()
@@ -1044,6 +1117,16 @@ class GridManager(Dict[Tuple[int, int], GridCell]):
         all_expeditions = []
         expedition_map = {}  # Map expedition_id -> (vehicle_data, expedition)
 
+        near_axis_masks = self._near_axis_by_expedition(
+            [
+                expedition
+                for vehicle_data in vm.vehicles.values()
+                for expedition in vehicle_data.expeditions.values()
+                if len(expedition.gps_points) >= 2
+            ],
+            max_distance,
+        )
+
         for vehicle_data in vm.vehicles.values():
             for expedition in vehicle_data.expeditions.values():
                 if len(expedition.gps_points) < 2:
@@ -1058,32 +1141,10 @@ class GridManager(Dict[Tuple[int, int], GridCell]):
                     ],
                     gps_bearings=[gps.bearing for gps in expedition.gps_points],
                     gps_timestamps=[gps.timestamp for gps in expedition.gps_points],
+                    near_axis=near_axis_masks[expedition.id],
                 )
                 all_expeditions.append(exp_input)
                 expedition_map[str(expedition.id)] = (vehicle_data, expedition)
-
-        total_expeditions = len(all_expeditions)
-
-        if verbose:
-            print(f"Preparing {total_expeditions} expeditions for HMM map matching...")
-            print(f"  Workers: {num_workers}, Min for parallel: {min_expeditions}")
-
-        # Step 3: Decide serial vs parallel based on expedition count
-        if total_expeditions < min_expeditions or num_workers <= 1:
-            if verbose:
-                print(
-                    f"Using serial processing (expeditions={total_expeditions}, workers={num_workers})"
-                )
-            # Fall back to serial processing
-            return self.run_hmm_map_matching(
-                vm,
-                max_distance,
-                sigma,
-                beta,
-                min_candidates,
-                sigma_bearing,
-                bearing_weight_factor,
-            )
 
         # Step 4: Prepare HMM parameters
         hmm_params = {

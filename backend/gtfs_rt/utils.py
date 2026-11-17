@@ -96,6 +96,19 @@ def get_day_type(dt: datetime):
     return day_type
 
 
+def get_day_bounds(dt: datetime):
+    """[start, end) of dt's day; a range filter can use indexes, timestamp__date cannot."""
+    start = timezone.localtime(dt).replace(hour=0, minute=0, second=0, microsecond=0)
+    return start, start + timedelta(days=1)
+
+
+def get_month_bounds(year: int, month: int):
+    """[start, end) of a month in UTC."""
+    start = datetime(year, month, 1, tzinfo=pytz.utc)
+    end = datetime(year + month // 12, month % 12 + 1, 1, tzinfo=pytz.utc)
+    return start, end
+
+
 def get_previous_month():
     current_datetime = timezone.now()
     current_date = current_datetime.replace(day=1)

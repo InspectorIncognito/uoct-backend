@@ -242,8 +242,8 @@ SECURE_PROXY_SSL_HEADER = ("HTTP_X_FORWARDED_PROTO", "https")
 # =============================================================================
 # Number of worker processes for parallel HMM map matching.
 # - Set to 0 or 1 to disable parallelization (serial processing)
-# - Set to 'auto' or leave unset to auto-detect (cpu_count - 1, max 8)
-# - For EC2 t3.medium (2 vCPU): use 2
+# - Set to 'auto' or leave unset to auto-detect (cpu_count - 1, max 8; one CPU stays free)
+# - For EC2 t3.medium (2 vCPU): auto gives 1 (serial), almost as fast as 2 and lighter
 # - For EC2 t3.large/c5.large (2-4 vCPU): use 4
 # - For EC2 c5.2xlarge (8 vCPU): use 6-8
 HMM_NUM_WORKERS = config("HMM_NUM_WORKERS", default="auto")

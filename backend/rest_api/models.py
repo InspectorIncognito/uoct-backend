@@ -6,7 +6,12 @@ from django.db import models
 from django.utils import timezone
 from geojson.feature import Feature
 from geojson.geometry import LineString
-from gtfs_rt.utils import get_day_type, get_last_temporal_range, get_temporal_segment
+from gtfs_rt.utils import (
+    get_day_bounds,
+    get_day_type,
+    get_last_temporal_range,
+    get_temporal_segment,
+)
 from processors.geometry.point import Point
 from rest_api.vars import SPEED_COLOR_RANGES
 from shapely.geometry import LineString as shp_LineString
@@ -151,9 +156,11 @@ class Segment(models.Model):
         else:
             start_time, end_time = get_last_temporal_range()
             temporal_segment = get_temporal_segment(start_time)
+            day_start, day_end = get_day_bounds(start_time)
             speed = Speed.objects.filter(
                 segment=self,
-                timestamp__date=start_time.date(),
+                timestamp__gte=day_start,
+                timestamp__lt=day_end,
                 temporal_segment=temporal_segment,
             ).first()
 
@@ -257,6 +264,8 @@ class Speed(models.Model):
         indexes = [
             models.Index(fields=["segment", "timestamp", "temporal_segment"]),
             models.Index(fields=["segment", "temporal_segment"]),
+            # Alerts, CSV exports and daily filters query by timestamp, without segment
+            models.Index(fields=["timestamp", "temporal_segment"]),
         ]
 
     # speed = models.FloatField(blank=False, null=False)
@@ -313,6 +322,7 @@ class HistoricSpeed(models.Model):
             models.Index(
                 fields=["segment", "day_type", "temporal_segment", "-timestamp"]
             ),
+            models.Index(fields=["day_type", "temporal_segment"]),
         ]
 
 

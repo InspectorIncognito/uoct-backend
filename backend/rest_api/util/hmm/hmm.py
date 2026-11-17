@@ -17,6 +17,8 @@ from shapely.geometry import LineString, Point
 from shapely.ops import nearest_points
 
 EARTH_RADIUS_M = 6371000
+# Meters between the densified points of a spatial index (build_spatial_index default)
+DENSIFY_INTERVAL = 20.0
 
 
 @dataclass
@@ -230,8 +232,39 @@ def densify_linestring(
         return [line.interpolate(d) for d in distances]
 
 
+def observations_near_axis(
+    coords: np.ndarray,
+    spatial_index: Tuple[cKDTree, np.ndarray, np.ndarray, bool],
+    max_distance: float,
+) -> np.ndarray:
+    """
+    Mask of the observations that can have candidate segments in this axis.
+
+    Never drops a point that has a candidate: a segment within max_distance of a point
+    has a densified point within max_distance + DENSIFY_INTERVAL of it, so a point whose
+    nearest densified point is farther has no candidates (fallback included).
+    """
+    tree, _, _, is_geographic = spatial_index
+    finite = np.isfinite(coords).all(axis=1)
+    near = np.zeros(len(coords), dtype=bool)
+    if not finite.any():
+        return near
+
+    points = coords[finite]
+    nearest_dist, _ = tree.query(points, k=1)
+    reach = max_distance + DENSIFY_INTERVAL
+    if is_geographic:
+        # Same (conservative) meters-per-degree scale as nearest_edges_optimized
+        lon_deg_to_m = 111000.0 * np.cos(np.radians(points[:, 1]))
+        limit = reach / np.maximum(np.minimum(111000.0, lon_deg_to_m), 1e-9)
+    else:
+        limit = reach
+    near[finite] = nearest_dist <= limit
+    return near
+
+
 def build_spatial_index(
-    segments_gdf: gpd.GeoDataFrame, interval: float = 20.0
+    segments_gdf: gpd.GeoDataFrame, interval: float = DENSIFY_INTERVAL
 ) -> Tuple[cKDTree, np.ndarray, np.ndarray, bool]:
     """Build a densified KDTree spatial index."""
     is_geo = False
@@ -469,8 +502,11 @@ def viterbi(
     gps_bearings: Optional[List[Optional[float]]] = None,
     sigma_bearing: float = 30.0,
     bearing_weight_factor: float = 0.5,
+    near_axis: Optional[np.ndarray] = None,
 ) -> Tuple[List[Optional[int]], List[int], List[Optional[Point]]]:
     """Viterbi algorithm for HMM map matching - OPTIMIZED.
+
+    near_axis: precomputed observations_near_axis mask (computed here if None).
 
     Returns
     -------
@@ -516,8 +552,15 @@ def viterbi(
     observation_mapping: Dict[int, int] = {}
     filtered_candidates: List[Dict[int, Tuple[Point, float, Optional[float]]]] = []
 
+    if near_axis is None:
+        near_axis = observations_near_axis(
+            np.array([(p.x, p.y) for p in gps_trajectory], dtype=float).reshape(-1, 2),
+            spatial_index,
+            max_distance,
+        )
+
     for i, gps_point in enumerate(gps_trajectory):
-        if i in excluded_indices:
+        if i in excluded_indices or not near_axis[i]:
             continue
         candidates = nearest_edges_optimized(
             gps_point, spatial_index, segment_cache, max_distance
@@ -649,7 +692,7 @@ def viterbi(
 
 
 def precompute_axes_caches(
-    axes_dict: Dict[str, gpd.GeoDataFrame], interval: float = 20.0
+    axes_dict: Dict[str, gpd.GeoDataFrame], interval: float = DENSIFY_INTERVAL
 ) -> Tuple[
     Dict[str, Tuple[cKDTree, np.ndarray, np.ndarray, bool]],
     Dict[str, DirectionCache],
