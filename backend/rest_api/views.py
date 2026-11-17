@@ -1,17 +1,17 @@
 import gzip
 import io
 import json
-from velocity.constants import SEGMENT_DISTANCE_METERS
+from velocity.constants import SEGMENT_DISTANCE_METERS, TEMPORAL_SEGMENT_SECONDS
 import os
 import threading
 from datetime import datetime
 
+from django.core.cache import cache
 from django.core.management import call_command
 from django.db.models import ExpressionWrapper, F, FloatField
 from django.db.models.functions import Round
 from django.http import JsonResponse, StreamingHttpResponse
 from django.utils import timezone
-from geojson import Feature, FeatureCollection, Point
 from gtfs_rt.processors.speed import calculate_speed
 from gtfs_rt.utils import get_last_temporal_range, get_previous_month
 from processors.models.shapes import shapes_to_geojson
@@ -87,18 +87,31 @@ class GTFSStopsViewSet(generics.GenericAPIView):
     permission_classes = [AllowAny]
     serializer_class = None  # View returns GeoJSON response
 
-    def get(self, request):
+    CACHE_KEY = "rest_api:gtfs_stops_geojson"
+    CACHE_TTL = 6 * 60 * 60  # GTFS is refreshed once a day
+
+    @staticmethod
+    def _build_stops_geojson():
+        # Downloads the whole GTFS zip, so the result is cached
         gtfs_manager = GTFSManager()
         stops = gtfs_manager.stops_reader.load_csv_file_as_df()
-        stopsFeatureCollection = []
-        for idx, stop in stops.iterrows():
-            stop_lat = stop["stop_lat"]
-            stop_lon = stop["stop_lon"]
-            stopsFeatureCollection.append(
-                Feature(geometry=Point(coordinates=[stop_lon, stop_lat]))
-            )
-        stopsFeatureCollection = FeatureCollection(stopsFeatureCollection)
-        return JsonResponse(stopsFeatureCollection, safe=False)
+        features = [
+            {
+                "type": "Feature",
+                # 6 decimals (~0.1 m), same precision the geojson package used
+                "geometry": {
+                    "type": "Point",
+                    "coordinates": [round(float(lon), 6), round(float(lat), 6)],
+                },
+                "properties": {},
+            }
+            for lon, lat in zip(stops["stop_lon"], stops["stop_lat"])
+        ]
+        return {"type": "FeatureCollection", "features": features}
+
+    def get(self, request):
+        data = cache.get_or_set(self.CACHE_KEY, self._build_stops_geojson, self.CACHE_TTL)
+        return JsonResponse(data, safe=False)
 
 
 class ShapeViewSet(viewsets.ModelViewSet):
@@ -393,10 +406,8 @@ class SpeedViewSet(GenericSpeedViewSet):
                     sg.shape_id AS shape,
                     sg.sequence AS sequence,
                     FLOOR(
-                        (
-                            EXTRACT(HOUR FROM (sp.timestamp AT TIME ZONE 'America/Santiago')) * 60
-                            + EXTRACT(MINUTE FROM (sp.timestamp AT TIME ZONE 'America/Santiago'))
-                        ) / 15
+                        EXTRACT(EPOCH FROM (sp.timestamp AT TIME ZONE 'America/Santiago')::time)
+                        / {TEMPORAL_SEGMENT_SECONDS}
                     )::int AS temporal_segment,
                     CASE
                         WHEN EXTRACT(ISODOW FROM (sp.timestamp AT TIME ZONE 'America/Santiago')) BETWEEN 1 AND 5 THEN 'L'
@@ -440,10 +451,8 @@ class SpeedViewSet(GenericSpeedViewSet):
                     sg.shape_id AS shape,
                     sg.sequence AS sequence,
                     FLOOR(
-                        (
-                            EXTRACT(HOUR FROM (sp.timestamp AT TIME ZONE 'America/Santiago')) * 60
-                            + EXTRACT(MINUTE FROM (sp.timestamp AT TIME ZONE 'America/Santiago'))
-                        ) / 15
+                        EXTRACT(EPOCH FROM (sp.timestamp AT TIME ZONE 'America/Santiago')::time)
+                        / {TEMPORAL_SEGMENT_SECONDS}
                     )::int AS temporal_segment,
                     CASE
                         WHEN EXTRACT(ISODOW FROM (sp.timestamp AT TIME ZONE 'America/Santiago')) BETWEEN 1 AND 5 THEN 'L'
@@ -560,10 +569,8 @@ class HistoricSpeedViewSet(GenericSpeedViewSet):
                     sg.shape_id AS shape,
                     sg.sequence AS sequence,
                     FLOOR(
-                        (
-                            EXTRACT(HOUR FROM (hs.timestamp AT TIME ZONE 'America/Santiago')) * 60
-                            + EXTRACT(MINUTE FROM (hs.timestamp AT TIME ZONE 'America/Santiago'))
-                        ) / 15
+                        EXTRACT(EPOCH FROM (hs.timestamp AT TIME ZONE 'America/Santiago')::time)
+                        / {TEMPORAL_SEGMENT_SECONDS}
                     )::int AS temporal_segment,
                     CASE
                         WHEN EXTRACT(ISODOW FROM (hs.timestamp AT TIME ZONE 'America/Santiago')) BETWEEN 1 AND 5 THEN 'L'
@@ -605,10 +612,8 @@ class HistoricSpeedViewSet(GenericSpeedViewSet):
                     sg.shape_id AS shape,
                     sg.sequence AS sequence,
                     FLOOR(
-                        (
-                            EXTRACT(HOUR FROM (hs.timestamp AT TIME ZONE 'America/Santiago')) * 60
-                            + EXTRACT(MINUTE FROM (hs.timestamp AT TIME ZONE 'America/Santiago'))
-                        ) / 15
+                        EXTRACT(EPOCH FROM (hs.timestamp AT TIME ZONE 'America/Santiago')::time)
+                        / {TEMPORAL_SEGMENT_SECONDS}
                     )::int AS temporal_segment,
                     CASE
                         WHEN EXTRACT(ISODOW FROM (hs.timestamp AT TIME ZONE 'America/Santiago')) BETWEEN 1 AND 5 THEN 'L'
@@ -679,20 +684,19 @@ class StopViewSet(viewsets.ModelViewSet):
     queryset = Stop.objects.all()
 
     def to_geojson(self, request, *args, **kwargs):
-        stops = self.get_queryset()
-        stops_feature_collection = []
-        for stop in stops:
-            stops_feature_collection.append(
-                Feature(
-                    geometry=Point(coordinates=[stop.longitude, stop.latitude]),
-                    properties={
-                        "shape_pk": stop.segment.shape.pk,
-                        "segment_pk": stop.segment.sequence,
-                    },
-                )
-            )
-        stops_feature_collection = FeatureCollection(stops_feature_collection)
-        return JsonResponse(stops_feature_collection, safe=False)
+        # One query with the segment join instead of two lazy FK lookups per stop
+        stops = self.get_queryset().values_list(
+            "longitude", "latitude", "segment__shape_id", "segment__sequence"
+        )
+        features = [
+            {
+                "type": "Feature",
+                "geometry": {"type": "Point", "coordinates": [lon, lat]},
+                "properties": {"shape_pk": shape_pk, "segment_pk": sequence},
+            }
+            for lon, lat, shape_pk, sequence in stops
+        ]
+        return JsonResponse({"type": "FeatureCollection", "features": features})
 
 
 class GTFSShapeViewSet(viewsets.ModelViewSet):
@@ -709,12 +713,24 @@ class GTFSShapeViewSet(viewsets.ModelViewSet):
         return queryset
 
     def geojson(self, request, *args, **kwargs):
-        queryset = self.filter_queryset(self.get_queryset())
-        features_list = []
-        for shape in queryset:
-            features_list.append(shape.to_geojson())
-        geojson = FeatureCollection(features=features_list)
-        return JsonResponse(geojson)
+        # Plain dicts: geojson.LineString validates and rounds every coordinate
+        # (~400k points), which took most of the request time
+        queryset = self.filter_queryset(self.get_queryset()).values_list(
+            "shape_id", "route_id", "direction", "geometry"
+        )
+        features = [
+            {
+                "type": "Feature",
+                "geometry": {"type": "LineString", "coordinates": geometry},
+                "properties": {
+                    "shape_id": str(shape_id),
+                    "route_id": str(route_id),
+                    "direction": str(direction),
+                },
+            }
+            for shape_id, route_id, direction, geometry in queryset
+        ]
+        return JsonResponse({"type": "FeatureCollection", "features": features})
 
 
 class GridViewSet(generics.GenericAPIView):

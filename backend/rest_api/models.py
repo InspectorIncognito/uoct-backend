@@ -12,6 +12,9 @@ from rest_api.vars import SPEED_COLOR_RANGES
 from shapely.geometry import LineString as shp_LineString
 from velocity.constants import DEG_PI, DEG_PI_HALF
 
+# Sentinel to tell "argument not passed" apart from an explicit None
+_NOT_PROVIDED = object()
+
 
 class Shape(models.Model):
     name = models.CharField(max_length=128)
@@ -138,7 +141,7 @@ class Segment(models.Model):
 
     def to_geojson(self):
         properties = dict(
-            shape_id=self.shape.pk,
+            shape_id=self.shape_id,
             sequence=self.sequence,
         )
 
@@ -191,7 +194,8 @@ class Segment(models.Model):
 
             if alert:
                 properties["alert_id"] = alert.pk
-            # Pass prefetched historic_speed to avoid redundant query in check_value
+            # Pass the historic_speed already looked up (even if None) so check_value
+            # does not query it again for every segment
             properties.update(
                 speed.check_value(prefetched_historic_speed=historic_speed)
             )
@@ -269,14 +273,15 @@ class Speed(models.Model):
                 return color
         return "#FFFFFF"
 
-    def check_value(self, prefetched_historic_speed=None):
+    def check_value(self, prefetched_historic_speed=_NOT_PROVIDED):
         geojson_data = dict()
         geojson_data["speed"] = self.get_speed()
         geojson_data["color"] = self.assign_color()
         geojson_data["temporal_segment"] = self.temporal_segment
 
-        # Use prefetched historic_speed if provided, otherwise query
-        if prefetched_historic_speed is not None:
+        # Use prefetched historic_speed if provided (None means "looked up, not found"),
+        # otherwise query
+        if prefetched_historic_speed is not _NOT_PROVIDED:
             historic_speed = prefetched_historic_speed
         else:
             historic_speed = (

@@ -1,5 +1,6 @@
 """Module for reading GTFS files and returning them as a dictionary."""
 
+import os
 from io import BytesIO
 from typing import IO
 from zipfile import BadZipFile, ZipFile
@@ -151,12 +152,16 @@ class GTFSManager:
         :raises BadZipFile: If the GTFS zip file is not a valid zip file.
         """
         is_str = isinstance(self.gtfs_url, str)
-        gtfs_data = requests.get(self.gtfs_url, stream=True)
-        gtfs_data = BytesIO(gtfs_data.content)
-        valid_type = self.__is_valid_zip_file(gtfs_data)
-
         if not is_str:
             raise TypeError("The path to the GTFS zip file must be a string.")
+
+        if os.path.isfile(self.gtfs_url):
+            # Local GTFS zip (e.g. GTFS_URL=/path/to/GTFS_YYYYMMDD.zip)
+            with open(self.gtfs_url, "rb") as gtfs_file:
+                gtfs_data = BytesIO(gtfs_file.read())
+        else:
+            gtfs_data = BytesIO(requests.get(self.gtfs_url, stream=True).content)
+        valid_type = self.__is_valid_zip_file(gtfs_data)
 
         if not valid_type:
             raise BadZipFile(f"File {self.gtfs_url} is not a valid zip file.")

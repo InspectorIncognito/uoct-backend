@@ -90,14 +90,14 @@ class ShapeManager:
 
     def get_all_services(self):
         services = set()
-        for shape in self.shapes:
-            segments = shape.get_segments()
-            for segment in segments:
-                seg_services = segment.get_services()
-                if seg_services is None:
-                    # Simplemente lo ignoramos
-                    continue
-                services.update(seg_services)
+        # Single query instead of one per segment
+        for seg_services in Services.objects.filter(
+            segment__shape__in=self.shapes
+        ).values_list("services", flat=True):
+            if seg_services is None:
+                # Simplemente lo ignoramos
+                continue
+            services.update(seg_services)
         return services
 
     def get_buffered_shape(self):

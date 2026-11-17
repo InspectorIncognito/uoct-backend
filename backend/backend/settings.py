@@ -207,12 +207,22 @@ REDIS_CONF = {
     "PORT": config("REDIS_PORT"),
     "DB": config("REDIS_DB"),
     "DEFAULT_TIMEOUT": 60 * 60 * 24,
+    # redis-py >= 6 defaults socket_timeout to 5 s, but idle rq workers block on BLPOP
+    # for up to ~405 s, so the read timed out and the worker died. Keep it above that.
+    "REDIS_CLIENT_KWARGS": {"socket_timeout": 600, "socket_connect_timeout": 10},
 }
 
-RQ_QUEUES = {"email_sender": REDIS_CONF, "default": REDIS_CONF, "cronlike": REDIS_CONF}
+RQ_QUEUES = {
+    "email_sender": REDIS_CONF,
+    "default": REDIS_CONF,
+    "cronlike": REDIS_CONF,
+    "speed": REDIS_CONF,
+}
 
 RQ = {"DEFAULT_RESULT_TTL": 60 * 60 * 24}
 CRONLIKE_QUEUE = "cronlike"
+# Speed calculation has its own queue/worker so GPS downloads never delay it
+SPEED_QUEUE = "speed"
 
 # Custom handler to failed jobs
 RQ_EXCEPTION_HANDLERS = []

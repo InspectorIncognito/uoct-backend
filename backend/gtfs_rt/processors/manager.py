@@ -43,45 +43,75 @@ class GTFSRTManager:
         response = requests.get(self.url)
         return response.content
 
-    # TODO: Review this method to be sure that duplicated data is not stored in DB.
-    # Fix the logic to compare timestamps correctly.
-    # Use UTC timezone for timestamp comparison.
-    def save_gtfs_rt_to_db(self, feed: gtfs_realtime_pb2.FeedMessage):
-        current_timestamp = self.get_timestamp_from_feed(feed)
-        if current_timestamp:
-            current_timestamp = str(current_timestamp)
-            manager = GTFSRTTimestamp.objects.first()
-            last_timestamp = manager.last_timestamp
-            if last_timestamp != "":
-                if current_timestamp <= last_timestamp:
-                    print("Ignoring duplicated GTFS-RT")
-                    return
-            else:
-                manager.last_timestamp = current_timestamp
-                manager.save()
+    @staticmethod
+    def is_new_feed(feed_timestamp: int) -> bool:
+        """Return True (and remember it) only if the feed is newer than the last one stored.
 
+        The feed is republished with the same header timestamp, and the same file can be
+        downloaded more than once, so older or equal feeds are skipped.
+        """
+        if not feed_timestamp:
+            return True
+        manager = GTFSRTTimestamp.objects.first()
+        if manager is None:
+            manager = GTFSRTTimestamp.objects.create(last_timestamp="")
+        last_timestamp = int(manager.last_timestamp) if manager.last_timestamp else 0
+        if feed_timestamp <= last_timestamp:
+            return False
+        manager.last_timestamp = str(feed_timestamp)
+        manager.save()
+        return True
+
+    @staticmethod
+    def build_new_pulses(feed: gtfs_realtime_pb2.FeedMessage) -> list:
+        """GPSPulse objects for the vehicle positions not stored yet.
+
+        A vehicle that did not report again keeps its old position (same plate and
+        timestamp) in the next feed, so (license_plate, timestamp) already in the DB,
+        or repeated inside the feed, are skipped.
+        """
+        pulses = {}
         for entity in feed.entity:
-            if entity.HasField("vehicle"):
-                v = entity.vehicle
-                if v.HasField("vehicle"):
-                    timestamp = v.timestamp
-                    route_id = v.trip.route_id if v.trip.HasField("route_id") else None
-                    direction = (
-                        v.trip.direction_id if v.trip.HasField("direction_id") else None
-                    )
-                    license_plate = v.vehicle.license_plate
-                    gps = v.position
-                    GPSPulse.objects.create(
-                        route_id=route_id,
-                        direction=direction,
-                        latitude=gps.latitude,
-                        longitude=gps.longitude,
-                        bearing=gps.bearing,
-                        license_plate=license_plate,
-                        timestamp=datetime.datetime.fromtimestamp(timestamp).astimezone(
-                            timezone.get_current_timezone()
-                        ),
-                    )
+            if not entity.HasField("vehicle"):
+                continue
+            v = entity.vehicle
+            if not v.HasField("vehicle"):
+                continue
+            timestamp = datetime.datetime.fromtimestamp(
+                v.timestamp, tz=datetime.timezone.utc
+            )
+            key = (v.vehicle.license_plate, timestamp)
+            if key in pulses:
+                continue
+            gps = v.position
+            pulses[key] = GPSPulse(
+                route_id=v.trip.route_id if v.trip.HasField("route_id") else None,
+                direction=v.trip.direction_id if v.trip.HasField("direction_id") else None,
+                latitude=gps.latitude,
+                longitude=gps.longitude,
+                bearing=gps.bearing,
+                license_plate=v.vehicle.license_plate,
+                timestamp=timestamp,
+            )
+        if not pulses:
+            return []
+
+        timestamps = [ts for _, ts in pulses]
+        existing = set(
+            GPSPulse.objects.filter(
+                timestamp__gte=min(timestamps), timestamp__lte=max(timestamps)
+            ).values_list("license_plate", "timestamp")
+        )
+        return [pulse for key, pulse in pulses.items() if key not in existing]
+
+    def save_gtfs_rt_to_db(self, feed: gtfs_realtime_pb2.FeedMessage):
+        if not self.is_new_feed(self.get_timestamp_from_feed(feed)):
+            print("Ignoring duplicated GTFS-RT")
+            return
+
+        new_pulses = self.build_new_pulses(feed)
+        GPSPulse.objects.bulk_create(new_pulses, batch_size=2000)
+        print(f"Saved {len(new_pulses)} new GPS pulses of {len(feed.entity)} entities.")
 
     def run_process(self):
         raw_data = self.download_raw_gtfs_rt_data()

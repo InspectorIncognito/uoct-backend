@@ -1,3 +1,4 @@
+from velocity.constants import TEMPORAL_SEGMENTS_PER_DAY
 from django.core.management import BaseCommand
 from rest_api.models import HistoricSpeed, Segment
 
@@ -5,7 +6,7 @@ from rest_api.models import HistoricSpeed, Segment
 class Command(BaseCommand):
     def handle(self, *args, **options):
         print("Calling create_dummy_historic_speed command...")
-        temporal_segments = int(1440 / 15)
+        temporal_segments = TEMPORAL_SEGMENTS_PER_DAY
         day_types = ['L', 'S', 'D']
         speed = 16
         segments = Segment.objects.all()

@@ -10,7 +10,7 @@ from typing import TYPE_CHECKING, List
 import pytz
 from django.utils.timezone import get_current_timezone
 from processors.geometry.point import Point
-from velocity.constants import SEGMENT_DISTANCE_METERS
+from velocity.constants import SEGMENT_DISTANCE_METERS, TEMPORAL_SEGMENT_MINUTES
 from rest_api.util.shape import ShapeManager
 
 if TYPE_CHECKING:
@@ -155,7 +155,7 @@ class SegmentCriteria:
 
     def __init__(self, grid_manager: GridManager):
         self.grid_manager = grid_manager
-        self.temporal_segment_duration = 15  # in minutes
+        self.temporal_segment_duration = TEMPORAL_SEGMENT_MINUTES  # in minutes
         self.shape_manager = ShapeManager()
 
     def get_spatial_segment(self, *args, **kwargs):
@@ -167,8 +167,12 @@ class SegmentCriteria:
         if dt.tzinfo is None:
             raise ValueError("datetime instance must have a tzinfo")
         converted_timestamp = dt.astimezone(timezone)
-        day_minutes = converted_timestamp.minute + converted_timestamp.hour * 60
-        index = int(day_minutes / self.temporal_segment_duration)
+        day_seconds = (
+            converted_timestamp.hour * 3600
+            + converted_timestamp.minute * 60
+            + converted_timestamp.second
+        )
+        index = int(day_seconds // (self.temporal_segment_duration * 60))
 
         start_time = converted_timestamp.replace(
             hour=0, minute=0, second=0, microsecond=0
