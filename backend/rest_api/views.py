@@ -1,18 +1,20 @@
 import gzip
 import io
 import json
+from velocity.constants import SEGMENT_DISTANCE_METERS, TEMPORAL_SEGMENT_SECONDS
 import os
 import threading
 from datetime import datetime
 
+from django.core.cache import cache
 from django.core.management import call_command
 from django.db.models import ExpressionWrapper, F, FloatField
 from django.db.models.functions import Round
-from django.http import JsonResponse, StreamingHttpResponse
+from django.core.serializers.json import DjangoJSONEncoder
+from django.http import HttpResponse, JsonResponse, StreamingHttpResponse
 from django.utils import timezone
-from geojson import Feature, FeatureCollection, Point
 from gtfs_rt.processors.speed import calculate_speed
-from gtfs_rt.utils import get_last_temporal_range, get_previous_month
+from gtfs_rt.utils import get_last_temporal_range, get_month_bounds, get_previous_month
 from processors.models.shapes import shapes_to_geojson
 from rest_api.models import (
     Alert,
@@ -76,28 +78,45 @@ class GeoJSONViewSet(generics.GenericAPIView):
 
     def get(self, request):
         # Returns a GeoJSON with the latest data.
-        # This includes the 500-meter-segmented-path with its corresponding velocities
-        shapes_json = shapes_to_geojson()
-
-        return JsonResponse(shapes_json, safe=False)
+        # This includes the segmented path (SEGMENT_DISTANCE_METERS) with its corresponding velocities
+        window_start, _ = get_last_temporal_range()
+        payload = cache.get_or_set(
+            f"rest_api:map_data:{window_start.isoformat()}",
+            lambda: json.dumps(shapes_to_geojson(), cls=DjangoJSONEncoder),
+            60,  # speeds change per window, alert votes can change sooner
+        )
+        return HttpResponse(payload, content_type="application/json")
 
 
 class GTFSStopsViewSet(generics.GenericAPIView):
     permission_classes = [AllowAny]
     serializer_class = None  # View returns GeoJSON response
 
-    def get(self, request):
+    CACHE_KEY = "rest_api:gtfs_stops_geojson"
+    CACHE_TTL = 6 * 60 * 60  # GTFS is refreshed once a day
+
+    @staticmethod
+    def _build_stops_geojson():
+        # Downloads the whole GTFS zip, so the result is cached
         gtfs_manager = GTFSManager()
         stops = gtfs_manager.stops_reader.load_csv_file_as_df()
-        stopsFeatureCollection = []
-        for idx, stop in stops.iterrows():
-            stop_lat = stop["stop_lat"]
-            stop_lon = stop["stop_lon"]
-            stopsFeatureCollection.append(
-                Feature(geometry=Point(coordinates=[stop_lon, stop_lat]))
-            )
-        stopsFeatureCollection = FeatureCollection(stopsFeatureCollection)
-        return JsonResponse(stopsFeatureCollection, safe=False)
+        features = [
+            {
+                "type": "Feature",
+                # 6 decimals (~0.1 m), same precision the geojson package used
+                "geometry": {
+                    "type": "Point",
+                    "coordinates": [round(float(lon), 6), round(float(lat), 6)],
+                },
+                "properties": {},
+            }
+            for lon, lat in zip(stops["stop_lon"], stops["stop_lat"])
+        ]
+        return {"type": "FeatureCollection", "features": features}
+
+    def get(self, request):
+        data = cache.get_or_set(self.CACHE_KEY, self._build_stops_geojson, self.CACHE_TTL)
+        return JsonResponse(data, safe=False)
 
 
 class ShapeViewSet(viewsets.ModelViewSet):
@@ -154,9 +173,12 @@ class GenericSpeedViewSet(viewsets.ModelViewSet, mixins.ListModelMixin):
         temporal_segment = self.request.query_params.get("temporalSegment")
 
         if month is not None:
-            month = int(month)
-            year = timezone.now().year
-            queryset = queryset.filter(timestamp__year=year, timestamp__month=month)
+            month_start, month_end = get_month_bounds(
+                timezone.now().year, int(month)
+            )
+            queryset = queryset.filter(
+                timestamp__gte=month_start, timestamp__lt=month_end
+            )
         if start_time is not None and end_time is not None:
             start_time = datetime.strptime(start_time, "%Y-%m-%dT%H:%M:%SZ")
             start_time = timezone.make_aware(start_time, timezone.utc)
@@ -193,10 +215,9 @@ class GenericSpeedViewSet(viewsets.ModelViewSet, mixins.ListModelMixin):
         temporal_segment = query_params.get("temporalSegment")
 
         if month is not None:
-            year = timezone.now().year
-            clauses.append(f"EXTRACT(YEAR  FROM {alias}.timestamp) = %s")
-            clauses.append(f"EXTRACT(MONTH FROM {alias}.timestamp) = %s")
-            params.extend([year, int(month)])
+            month_start, month_end = get_month_bounds(timezone.now().year, int(month))
+            clauses.append(f"{alias}.timestamp >= %s AND {alias}.timestamp < %s")
+            params.extend([month_start, month_end])
         if start_time is not None and end_time is not None:
             start_dt = timezone.make_aware(
                 datetime.strptime(start_time, "%Y-%m-%dT%H:%M:%SZ"), timezone.utc
@@ -287,6 +308,20 @@ class GenericSpeedViewSet(viewsets.ModelViewSet, mixins.ListModelMixin):
 class SpeedViewSet(GenericSpeedViewSet):
     serializer_class = SpeedSerializer
     queryset = Speed.objects.all().order_by("-temporal_segment")
+
+    def get_queryset(self):
+        queryset = super().get_queryset()
+        filters = ("startTime", "endTime", "month", "dayType", "temporalSegment")
+        if self.action == "list" and not any(
+            f in self.request.query_params for f in filters
+        ):
+            # Like the CSV exports: without filters, only the last window. Paginating
+            # the whole table needs a COUNT over millions of rows.
+            start_time, end_time = get_last_temporal_range()
+            queryset = queryset.filter(
+                timestamp__gte=start_time, timestamp__lte=end_time
+            )
+        return queryset
 
     filter_backends = [OrderingFilter]  # Add to existing backends if you have any
     ordering_fields = [
@@ -392,10 +427,8 @@ class SpeedViewSet(GenericSpeedViewSet):
                     sg.shape_id AS shape,
                     sg.sequence AS sequence,
                     FLOOR(
-                        (
-                            EXTRACT(HOUR FROM (sp.timestamp AT TIME ZONE 'America/Santiago')) * 60
-                            + EXTRACT(MINUTE FROM (sp.timestamp AT TIME ZONE 'America/Santiago'))
-                        ) / 15
+                        EXTRACT(EPOCH FROM (sp.timestamp AT TIME ZONE 'America/Santiago')::time)
+                        / {TEMPORAL_SEGMENT_SECONDS}
                     )::int AS temporal_segment,
                     CASE
                         WHEN EXTRACT(ISODOW FROM (sp.timestamp AT TIME ZONE 'America/Santiago')) BETWEEN 1 AND 5 THEN 'L'
@@ -439,10 +472,8 @@ class SpeedViewSet(GenericSpeedViewSet):
                     sg.shape_id AS shape,
                     sg.sequence AS sequence,
                     FLOOR(
-                        (
-                            EXTRACT(HOUR FROM (sp.timestamp AT TIME ZONE 'America/Santiago')) * 60
-                            + EXTRACT(MINUTE FROM (sp.timestamp AT TIME ZONE 'America/Santiago'))
-                        ) / 15
+                        EXTRACT(EPOCH FROM (sp.timestamp AT TIME ZONE 'America/Santiago')::time)
+                        / {TEMPORAL_SEGMENT_SECONDS}
                     )::int AS temporal_segment,
                     CASE
                         WHEN EXTRACT(ISODOW FROM (sp.timestamp AT TIME ZONE 'America/Santiago')) BETWEEN 1 AND 5 THEN 'L'
@@ -559,10 +590,8 @@ class HistoricSpeedViewSet(GenericSpeedViewSet):
                     sg.shape_id AS shape,
                     sg.sequence AS sequence,
                     FLOOR(
-                        (
-                            EXTRACT(HOUR FROM (hs.timestamp AT TIME ZONE 'America/Santiago')) * 60
-                            + EXTRACT(MINUTE FROM (hs.timestamp AT TIME ZONE 'America/Santiago'))
-                        ) / 15
+                        EXTRACT(EPOCH FROM (hs.timestamp AT TIME ZONE 'America/Santiago')::time)
+                        / {TEMPORAL_SEGMENT_SECONDS}
                     )::int AS temporal_segment,
                     CASE
                         WHEN EXTRACT(ISODOW FROM (hs.timestamp AT TIME ZONE 'America/Santiago')) BETWEEN 1 AND 5 THEN 'L'
@@ -604,10 +633,8 @@ class HistoricSpeedViewSet(GenericSpeedViewSet):
                     sg.shape_id AS shape,
                     sg.sequence AS sequence,
                     FLOOR(
-                        (
-                            EXTRACT(HOUR FROM (hs.timestamp AT TIME ZONE 'America/Santiago')) * 60
-                            + EXTRACT(MINUTE FROM (hs.timestamp AT TIME ZONE 'America/Santiago'))
-                        ) / 15
+                        EXTRACT(EPOCH FROM (hs.timestamp AT TIME ZONE 'America/Santiago')::time)
+                        / {TEMPORAL_SEGMENT_SECONDS}
                     )::int AS temporal_segment,
                     CASE
                         WHEN EXTRACT(ISODOW FROM (hs.timestamp AT TIME ZONE 'America/Santiago')) BETWEEN 1 AND 5 THEN 'L'
@@ -678,20 +705,19 @@ class StopViewSet(viewsets.ModelViewSet):
     queryset = Stop.objects.all()
 
     def to_geojson(self, request, *args, **kwargs):
-        stops = self.get_queryset()
-        stops_feature_collection = []
-        for stop in stops:
-            stops_feature_collection.append(
-                Feature(
-                    geometry=Point(coordinates=[stop.longitude, stop.latitude]),
-                    properties={
-                        "shape_pk": stop.segment.shape.pk,
-                        "segment_pk": stop.segment.sequence,
-                    },
-                )
-            )
-        stops_feature_collection = FeatureCollection(stops_feature_collection)
-        return JsonResponse(stops_feature_collection, safe=False)
+        # One query with the segment join instead of two lazy FK lookups per stop
+        stops = self.get_queryset().values_list(
+            "longitude", "latitude", "segment__shape_id", "segment__sequence"
+        )
+        features = [
+            {
+                "type": "Feature",
+                "geometry": {"type": "Point", "coordinates": [lon, lat]},
+                "properties": {"shape_pk": shape_pk, "segment_pk": sequence},
+            }
+            for lon, lat, shape_pk, sequence in stops
+        ]
+        return JsonResponse({"type": "FeatureCollection", "features": features})
 
 
 class GTFSShapeViewSet(viewsets.ModelViewSet):
@@ -708,12 +734,32 @@ class GTFSShapeViewSet(viewsets.ModelViewSet):
         return queryset
 
     def geojson(self, request, *args, **kwargs):
-        queryset = self.filter_queryset(self.get_queryset())
-        features_list = []
-        for shape in queryset:
-            features_list.append(shape.to_geojson())
-        geojson = FeatureCollection(features=features_list)
-        return JsonResponse(geojson)
+        payload = cache.get_or_set(
+            f"rest_api:gtfs_shape_geojson:{request.query_params.get('direction')}",
+            self._build_geojson_payload,
+            60 * 60,  # shapes are refreshed once a day
+        )
+        return HttpResponse(payload, content_type="application/json")
+
+    def _build_geojson_payload(self):
+        # Plain dicts: geojson.LineString validates and rounds every coordinate
+        # (~400k points), which took most of the request time
+        queryset = self.filter_queryset(self.get_queryset()).values_list(
+            "shape_id", "route_id", "direction", "geometry"
+        )
+        features = [
+            {
+                "type": "Feature",
+                "geometry": {"type": "LineString", "coordinates": geometry},
+                "properties": {
+                    "shape_id": str(shape_id),
+                    "route_id": str(route_id),
+                    "direction": str(direction),
+                },
+            }
+            for shape_id, route_id, direction, geometry in queryset
+        ]
+        return json.dumps({"type": "FeatureCollection", "features": features})
 
 
 class GridViewSet(generics.GenericAPIView):
@@ -880,7 +926,7 @@ class ProcessAxisView(generics.GenericAPIView):
             return JsonResponse({"error": serializer.errors}, status=400)
 
         axis_name = serializer.validated_data["axis_name"]
-        distance_threshold = serializer.validated_data.get("distance_threshold", 500.0)
+        distance_threshold = serializer.validated_data.get("distance_threshold", SEGMENT_DISTANCE_METERS)
 
         try:
             call_command(

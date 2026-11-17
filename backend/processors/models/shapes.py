@@ -1,6 +1,11 @@
 from django.db.models import Prefetch
 from geojson.feature import FeatureCollection
-from gtfs_rt.utils import get_day_type, get_last_temporal_range, get_temporal_segment
+from gtfs_rt.utils import (
+    get_day_bounds,
+    get_day_type,
+    get_last_temporal_range,
+    get_temporal_segment,
+)
 from rest_api.models import Alert, HistoricSpeed, Segment, Services, Shape, Speed
 from rest_api.util.alert import get_active_alerts
 
@@ -10,13 +15,16 @@ def shapes_to_geojson():
     start_time, end_time = get_last_temporal_range()
     temporal_segment = get_temporal_segment(start_time)
     day_type = get_day_type(start_time)
+    day_start, day_end = get_day_bounds(start_time)
 
     # Prefetch all related data to avoid N+1 queries
     # These prefetches are applied directly to Segment objects
     speed_prefetch = Prefetch(
         "speed_set",
         queryset=Speed.objects.filter(
-            timestamp__date=start_time.date(), temporal_segment=temporal_segment
+            timestamp__gte=day_start,
+            timestamp__lt=day_end,
+            temporal_segment=temporal_segment,
         ),
         to_attr="prefetched_speeds",
     )

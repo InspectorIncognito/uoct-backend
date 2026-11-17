@@ -13,7 +13,10 @@ MAX_SPEED_KMH = 85.0  # Maximum speed threshold in km/h
 
 
 def calculate_speed(
-    start_date: datetime.datetime = None, end_date: datetime.datetime = None
+    start_date: datetime.datetime = None,
+    end_date: datetime.datetime = None,
+    gps_df=None,
+    grid_obj: GridManager = None,
 ):
     print("Calling calculate_speed command...")
     speed_start_time = time.time()
@@ -22,11 +25,13 @@ def calculate_speed(
     today_weekday = start_date.weekday()
     today_weekday = "L" if today_weekday < 5 else "S" if today_weekday == 5 else "D"
 
-    grid_obj: GridManager = generate_grid()
+    if grid_obj is None:
+        grid_obj = generate_grid()
 
     vm = VehicleManager(grid_obj)
 
-    gps_df = grid_obj.filter_gps_from_dates(start_date, end_date)
+    if gps_df is None:
+        gps_df = grid_obj.filter_gps_from_dates(start_date, end_date)
     print(f"Retrieved {len(gps_df)} GPS Pulses.")
 
     start_time = time.time()

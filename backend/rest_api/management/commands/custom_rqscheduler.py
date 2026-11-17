@@ -1,4 +1,5 @@
 import logging
+from datetime import datetime, timedelta, timezone
 
 import django_rq
 from django.conf import settings
@@ -8,9 +9,21 @@ from gtfs_rt.utils import flush_gps_pulses, update_gtfs_data
 from processors.speed.avg_speed import get_last_month_avg_speed
 
 from rest_api.util.process import calculate_speed_and_check_alerts
+from velocity.constants import TEMPORAL_SEGMENT_SECONDS
 
 scheduler = django_rq.get_scheduler(settings.CRONLIKE_QUEUE)
 logger = logging.getLogger(__name__)
+
+SPEED_JOB_DELAY_SECONDS = 30
+
+
+def next_temporal_window_start() -> datetime:
+    """Start (UTC) of the next temporal window, e.g. hh:00:00, hh:07:30, hh:15:00, ..."""
+    now = datetime.now(timezone.utc)
+    midnight = now.replace(hour=0, minute=0, second=0, microsecond=0)
+    elapsed = (now - midnight).total_seconds()
+    windows = int(elapsed // TEMPORAL_SEGMENT_SECONDS) + 1
+    return midnight + timedelta(seconds=windows * TEMPORAL_SEGMENT_SECONDS)
 
 
 def clear_scheduled_jobs():
@@ -40,13 +53,15 @@ def register_scheduled_jobs():
         use_local_timezone=False,  # Interpret hours in the local timezone
     )
     # TODO: Analyze if we need to delete speeds records periodically
-    scheduler.cron(
-        "0/15 * * * *",  # every 15 minutes
+    # Speeds every TEMPORAL_SEGMENT_SECONDS (7.5 min does not fit in cron), aligned to the
+    # window boundaries plus a small delay so the last GPS pulses are already stored.
+    scheduler.schedule(
+        scheduled_time=next_temporal_window_start() + timedelta(seconds=SPEED_JOB_DELAY_SECONDS),
         func=calculate_speed_and_check_alerts,  # Function to be queued
         args=[],  # Arguments passed into function when executed
-        queue_name=settings.CRONLIKE_QUEUE,  # In which queue the job should be put in
+        interval=TEMPORAL_SEGMENT_SECONDS,  # seconds between runs
+        queue_name=settings.SPEED_QUEUE,  # In which queue the job should be put in
         repeat=None,  # Repeat this number of times (None means repeat forever)
-        use_local_timezone=False,  # Interpret hours in the local timezone
     )
     scheduler.cron(
         "0 0 1 * *",  # at 00:00 every day-of-month 1

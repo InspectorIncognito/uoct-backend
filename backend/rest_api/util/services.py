@@ -366,11 +366,11 @@ def assign_routes_to_segments(
 
 def get_all_services():
     shape_data = {}
-    for service in Services.objects.all():
-        shape_id = service.segment.shape.pk
-        set_services = shape_data.get(shape_id, set())
-        set_services.update(service.services)
-        shape_data[shape_id] = set_services
+    # Single query: reading service.segment.shape lazily cost two queries per row
+    for shape_id, services in Services.objects.values_list(
+        "segment__shape_id", "services"
+    ):
+        shape_data.setdefault(shape_id, set()).update(services)
     return shape_data
 
 

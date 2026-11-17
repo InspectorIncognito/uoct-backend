@@ -32,15 +32,20 @@ def get_month_commercial_speed(year: int, month: int):
         ),
     )
     print(f"Calculated {len(avg_speeds)} average speeds for month {month}/{year}.")
-    for avg_speed in avg_speeds:
-        historic_speed_data = dict(
-            segment=Segment.objects.get(pk=avg_speed["segment"]),
-            speed=avg_speed["avg_speed"],
-            day_type=avg_speed["day_type"],
-            temporal_segment=avg_speed["temporal_segment"],
-            timestamp=creation_date,
-        )
-        HistoricSpeed.objects.create(**historic_speed_data)
+    # segment_id avoids a Segment lookup per row; bulk_create avoids one INSERT per row
+    HistoricSpeed.objects.bulk_create(
+        [
+            HistoricSpeed(
+                segment_id=avg_speed["segment"],
+                speed=avg_speed["avg_speed"],
+                day_type=avg_speed["day_type"],
+                temporal_segment=avg_speed["temporal_segment"],
+                timestamp=creation_date,
+            )
+            for avg_speed in avg_speeds
+        ],
+        batch_size=2000,
+    )
 
 
 def save_historic_avg_speed(avg_speeds, custom_datetime=None):

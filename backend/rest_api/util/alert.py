@@ -8,7 +8,13 @@ from zoneinfo import ZoneInfo
 import requests
 from decouple import config
 from django.utils import timezone
-from gtfs_rt.utils import get_day_type, get_last_temporal_range, get_temporal_segment
+from gtfs_rt.utils import (
+    get_day_bounds,
+    get_day_type,
+    get_last_temporal_range,
+    get_temporal_segment,
+)
+from velocity.constants import TEMPORAL_SEGMENT_SECONDS
 from rest_api.models import Alert, AlertThreshold, HistoricSpeed, Segment, Speed
 
 logger = logging.getLogger()
@@ -260,22 +266,28 @@ def create_alerts(start_time: datetime = None, end_time: datetime = None):
     temporal_segment = get_temporal_segment(start_time)
     day_type = get_day_type(start_time)
 
-    segments = Segment.objects.all()
     alert_threshold = AlertThreshold.objects.first().threshold
 
-    for segment in segments:
-        speed_obj = Speed.objects.filter(
-            segment=segment,
-            timestamp__date=start_time.date(),
-            temporal_segment=temporal_segment,
-        ).first()
-        historic_speed = (
-            HistoricSpeed.objects.filter(
-                segment=segment, day_type=day_type, temporal_segment=temporal_segment
-            )
-            .order_by("-timestamp")
-            .first()
-        )
+    # Two queries for every segment instead of two per segment. Ordering by pk/timestamp
+    # and keeping the first row per segment matches the previous .first() lookups.
+    day_start, day_end = get_day_bounds(start_time)
+    speeds_by_segment = {}
+    for speed_obj in Speed.objects.filter(
+        timestamp__gte=day_start,
+        timestamp__lt=day_end,
+        temporal_segment=temporal_segment,
+    ).order_by("pk"):
+        speeds_by_segment.setdefault(speed_obj.segment_id, speed_obj)
+
+    historic_by_segment = {}
+    for historic_speed in HistoricSpeed.objects.filter(
+        day_type=day_type, temporal_segment=temporal_segment
+    ).order_by("-timestamp"):
+        historic_by_segment.setdefault(historic_speed.segment_id, historic_speed)
+
+    for segment in Segment.objects.all():
+        speed_obj = speeds_by_segment.get(segment.pk)
+        historic_speed = historic_by_segment.get(segment.pk)
         if speed_obj is None or historic_speed is None:
             logger.info(
                 f"Skipping alert check for segment {segment.segment_id} due to missing speed data."
@@ -362,7 +374,7 @@ def update_alerts(
 def get_active_alerts():
     # Use UTC time for database queries since Alert.timestamp is stored in UTC
     end_time = timezone.now()
-    start_time = end_time - timedelta(minutes=15)
+    start_time = end_time - timedelta(seconds=TEMPORAL_SEGMENT_SECONDS)
     # Use select_related to prefetch segment and shape in a single query
     alerts = Alert.objects.select_related("segment", "segment__shape").filter(
         timestamp__gte=start_time,

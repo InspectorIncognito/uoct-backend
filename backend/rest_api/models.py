@@ -6,11 +6,19 @@ from django.db import models
 from django.utils import timezone
 from geojson.feature import Feature
 from geojson.geometry import LineString
-from gtfs_rt.utils import get_day_type, get_last_temporal_range, get_temporal_segment
+from gtfs_rt.utils import (
+    get_day_bounds,
+    get_day_type,
+    get_last_temporal_range,
+    get_temporal_segment,
+)
 from processors.geometry.point import Point
 from rest_api.vars import SPEED_COLOR_RANGES
 from shapely.geometry import LineString as shp_LineString
 from velocity.constants import DEG_PI, DEG_PI_HALF
+
+# Sentinel to tell "argument not passed" apart from an explicit None
+_NOT_PROVIDED = object()
 
 
 class Shape(models.Model):
@@ -138,7 +146,7 @@ class Segment(models.Model):
 
     def to_geojson(self):
         properties = dict(
-            shape_id=self.shape.pk,
+            shape_id=self.shape_id,
             sequence=self.sequence,
         )
 
@@ -148,9 +156,11 @@ class Segment(models.Model):
         else:
             start_time, end_time = get_last_temporal_range()
             temporal_segment = get_temporal_segment(start_time)
+            day_start, day_end = get_day_bounds(start_time)
             speed = Speed.objects.filter(
                 segment=self,
-                timestamp__date=start_time.date(),
+                timestamp__gte=day_start,
+                timestamp__lt=day_end,
                 temporal_segment=temporal_segment,
             ).first()
 
@@ -191,7 +201,8 @@ class Segment(models.Model):
 
             if alert:
                 properties["alert_id"] = alert.pk
-            # Pass prefetched historic_speed to avoid redundant query in check_value
+            # Pass the historic_speed already looked up (even if None) so check_value
+            # does not query it again for every segment
             properties.update(
                 speed.check_value(prefetched_historic_speed=historic_speed)
             )
@@ -253,6 +264,8 @@ class Speed(models.Model):
         indexes = [
             models.Index(fields=["segment", "timestamp", "temporal_segment"]),
             models.Index(fields=["segment", "temporal_segment"]),
+            # Alerts, CSV exports and daily filters query by timestamp, without segment
+            models.Index(fields=["timestamp", "temporal_segment"]),
         ]
 
     # speed = models.FloatField(blank=False, null=False)
@@ -269,14 +282,15 @@ class Speed(models.Model):
                 return color
         return "#FFFFFF"
 
-    def check_value(self, prefetched_historic_speed=None):
+    def check_value(self, prefetched_historic_speed=_NOT_PROVIDED):
         geojson_data = dict()
         geojson_data["speed"] = self.get_speed()
         geojson_data["color"] = self.assign_color()
         geojson_data["temporal_segment"] = self.temporal_segment
 
-        # Use prefetched historic_speed if provided, otherwise query
-        if prefetched_historic_speed is not None:
+        # Use prefetched historic_speed if provided (None means "looked up, not found"),
+        # otherwise query
+        if prefetched_historic_speed is not _NOT_PROVIDED:
             historic_speed = prefetched_historic_speed
         else:
             historic_speed = (
@@ -308,6 +322,7 @@ class HistoricSpeed(models.Model):
             models.Index(
                 fields=["segment", "day_type", "temporal_segment", "-timestamp"]
             ),
+            models.Index(fields=["day_type", "temporal_segment"]),
         ]
 
 

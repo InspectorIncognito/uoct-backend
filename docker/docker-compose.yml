@@ -1,5 +1,14 @@
+# Docker keeps json-file logs without limit by default; the disk is small
+x-logging:
+  &default-logging
+  driver: json-file
+  options:
+    max-size: "20m"
+    max-file: "3"
+
 x-prod-server:
   &prod-server
+  logging: *default-logging
   build:
     context: ..
     dockerfile: docker/Dockerfile
@@ -33,6 +42,7 @@ services:
       - cache_network
 
   nginx:
+    logging: *default-logging
     profiles: ['prod']
     build:
       context: ..
@@ -83,12 +93,14 @@ services:
       - cache_network
 
   cache:
+    logging: *default-logging
     profiles: ['dev', 'prod', 'test']
     image: redis:latest
     networks:
       - cache_network
 
   db:
+    logging: *default-logging
     profiles: ['dev', 'prod', 'test']
     image: postgres:14.5-alpine3.16
     volumes:

@@ -3,10 +3,11 @@ from datetime import timedelta
 from django.utils import timezone
 from gtfs_rt.models import GPSPulse
 from gtfs_rt.utils import get_temporal_range, get_temporal_segment
+from velocity.constants import TEMPORAL_SEGMENT_SECONDS
 
 
 def get_gps_data_from_last_15_minutes():
-    delta_time = timedelta(minutes=15)
+    delta_time = timedelta(seconds=TEMPORAL_SEGMENT_SECONDS)
     now = timezone.now()
     previous_15_minutes = now - delta_time
     previous_temporal_segment = get_temporal_segment(previous_15_minutes)

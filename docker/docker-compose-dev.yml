@@ -38,6 +38,10 @@ services:
       - nginx_network
       - database_network
       - cache_network
+  worker:
+    environment:
+      # Local runs keep alerts in the local DB and never touch TranSapp admin
+      - TRANSAPP_SYNC_ENABLED=False
   db:
     profiles: ["dev", "test"]
     ports:

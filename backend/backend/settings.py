@@ -207,12 +207,22 @@ REDIS_CONF = {
     "PORT": config("REDIS_PORT"),
     "DB": config("REDIS_DB"),
     "DEFAULT_TIMEOUT": 60 * 60 * 24,
+    # redis-py >= 6 defaults socket_timeout to 5 s, but idle rq workers block on BLPOP
+    # for up to ~405 s, so the read timed out and the worker died. Keep it above that.
+    "REDIS_CLIENT_KWARGS": {"socket_timeout": 600, "socket_connect_timeout": 10},
 }
 
-RQ_QUEUES = {"email_sender": REDIS_CONF, "default": REDIS_CONF, "cronlike": REDIS_CONF}
+RQ_QUEUES = {
+    "email_sender": REDIS_CONF,
+    "default": REDIS_CONF,
+    "cronlike": REDIS_CONF,
+    "speed": REDIS_CONF,
+}
 
 RQ = {"DEFAULT_RESULT_TTL": 60 * 60 * 24}
 CRONLIKE_QUEUE = "cronlike"
+# Speed calculation has its own queue/worker so GPS downloads never delay it
+SPEED_QUEUE = "speed"
 
 # Custom handler to failed jobs
 RQ_EXCEPTION_HANDLERS = []
@@ -232,8 +242,8 @@ SECURE_PROXY_SSL_HEADER = ("HTTP_X_FORWARDED_PROTO", "https")
 # =============================================================================
 # Number of worker processes for parallel HMM map matching.
 # - Set to 0 or 1 to disable parallelization (serial processing)
-# - Set to 'auto' or leave unset to auto-detect (cpu_count - 1, max 8)
-# - For EC2 t3.medium (2 vCPU): use 2
+# - Set to 'auto' or leave unset to auto-detect (cpu_count - 1, max 8; one CPU stays free)
+# - For EC2 t3.medium (2 vCPU): auto gives 1 (serial), almost as fast as 2 and lighter
 # - For EC2 t3.large/c5.large (2-4 vCPU): use 4
 # - For EC2 c5.2xlarge (8 vCPU): use 6-8
 HMM_NUM_WORKERS = config("HMM_NUM_WORKERS", default="auto")

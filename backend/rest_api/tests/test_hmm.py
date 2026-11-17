@@ -1,9 +1,12 @@
 import geopandas as gpd
 from django.test import SimpleTestCase
+import numpy as np
 from rest_api.util.hmm.hmm import (
     build_segment_cache,
     build_spatial_index,
     haversine_distance,
+    nearest_edges_optimized,
+    observations_near_axis,
     precompute_direction_cache,
     shortest_path_distance,
     viterbi,
@@ -103,3 +106,44 @@ class ViterbiAcrossSegmentsTest(SimpleTestCase):
         matched, valid, _ = viterbi(trajectory, *self.caches, **HMM_PARAMS)
         self.assertEqual(valid, [0, 1])
         self.assertEqual([int(seg) for seg in matched], [1, 2])
+
+
+class ObservationsNearAxisTest(SimpleTestCase):
+    """The vectorized prefilter may only skip points that have no candidate segment."""
+
+    def setUp(self):
+        self.gdf = make_gdf(
+            [
+                (1, 0, 0, [(LON_A, LAT), (LON_B, LAT)]),
+                (2, 0, 1, [(LON_B, LAT), (LON_C, LAT)]),
+            ]
+        )
+        self.index = build_spatial_index(self.gdf)
+        self.cache = build_segment_cache(self.gdf)
+
+    def meters_north(self, meters):
+        return LAT + meters / 111000.0
+
+    def test_never_skips_a_point_with_candidates(self):
+        offsets = [0, 10, 25, 39, 40, 41, 45, 55, 60, 65, 80, 200, 2000]
+        lons = np.linspace(LON_A - 0.0005, LON_C + 0.0005, 37)
+        coords = np.array([(lon, self.meters_north(m)) for lon in lons for m in offsets])
+
+        near = observations_near_axis(coords, self.index, max_distance=40)
+
+        for (lon, lat), is_near in zip(coords, near):
+            has_candidates = bool(
+                nearest_edges_optimized(Point(lon, lat), self.index, self.cache, 40)
+            )
+            if has_candidates:
+                self.assertTrue(is_near, f"dropped a point with candidates: {lon}, {lat}")
+
+    def test_far_points_are_skipped(self):
+        coords = np.array([(LON_B, self.meters_north(5000)), (-71.5, -34.5)])
+        near = observations_near_axis(coords, self.index, max_distance=40)
+        self.assertFalse(near.any())
+
+    def test_non_finite_points_are_skipped(self):
+        coords = np.array([(np.nan, LAT), (LON_B, LAT), (LON_B, np.inf)])
+        near = observations_near_axis(coords, self.index, max_distance=40)
+        self.assertEqual(near.tolist(), [False, True, False])

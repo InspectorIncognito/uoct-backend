@@ -39,13 +39,16 @@ webserver-prod)
   # TODO: If you need to load data from fixtures, this is the place to call them
   # python manage.py loaddata
 
-  gunicorn --workers=2 --threads=50 --name backend-gunicorn --chdir backend --access-logfile - --bind :8000 backend.wsgi:application -t 1200 --max-requests=1000 --max-requests-jitter=50
+  # Sized for a 2 vCPU / 3.7 GB EC2 without swap: ~210 MB per worker process.
+  # GeoJSON views are CPU bound (GIL), so processes help more than many threads.
+  gunicorn --workers=${GUNICORN_WORKERS:-3} --threads=${GUNICORN_THREADS:-8} --name backend-gunicorn --chdir backend --access-logfile - --bind :8000 backend.wsgi:application -t 1200 --max-requests=1000 --max-requests-jitter=50
   ;;
 worker)
   echo "starting worker"
   # TODO: if you define a new queue, you must add it as a new param in this command call
   echo "running commands"
   python ./backend/manage.py rqworker default email_sender cronlike &
+  python ./backend/manage.py rqworker speed &
   python ./backend/manage.py custom_rqscheduler
   ;;
 test)

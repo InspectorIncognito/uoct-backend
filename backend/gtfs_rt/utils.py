@@ -13,6 +13,7 @@ from django.core.cache import cache
 from django.utils import timezone
 
 from gtfs_rt.models import GPSPulse
+from velocity.constants import TEMPORAL_SEGMENT_MINUTES, TEMPORAL_SEGMENT_SECONDS
 
 GTFS_RT_ALLOWED_SERVICE_ROUTES_CACHE_KEY = "gtfs_rt:allowed_service_routes"
 GTFS_RT_ALLOWED_SERVICE_ROUTES_CACHE_TTL = 1800
@@ -33,9 +34,9 @@ def speed_threshold(x):
     return (x - median) / MAD
 
 
-def get_temporal_segment(date: datetime, interval: int = 15):
-    day_minutes = date.hour * 60 + date.minute
-    return day_minutes // interval
+def get_temporal_segment(date: datetime, interval: float = TEMPORAL_SEGMENT_MINUTES):
+    day_seconds = date.hour * 3600 + date.minute * 60 + date.second
+    return int(day_seconds // (interval * 60))
 
 
 def get_temporal_range(temporal_segment, reference_datetime=None):
@@ -43,16 +44,12 @@ def get_temporal_range(temporal_segment, reference_datetime=None):
     if reference_datetime is None:
         reference_datetime = timezone.now()
 
-    start_minutes = temporal_segment * 15
-    start_hour = start_minutes // 60
-    start_minute = start_minutes % 60
-
     # Construir un datetime en UTC, conservando la fecha actual
     start_time = reference_datetime.replace(
-        hour=start_hour, minute=start_minute, second=0, microsecond=0
-    )
+        hour=0, minute=0, second=0, microsecond=0
+    ) + timedelta(seconds=temporal_segment * TEMPORAL_SEGMENT_SECONDS)
 
-    end_time = start_time + timedelta(minutes=15)
+    end_time = start_time + timedelta(seconds=TEMPORAL_SEGMENT_SECONDS)
     return start_time, end_time
 
 
@@ -62,16 +59,16 @@ def _get_last_temporal_range_cached(minute_key):
     Internal cached version of get_last_temporal_range.
     Uses minute_key to invalidate cache every minute.
     """
-    delta = timedelta(minutes=15)
+    delta = timedelta(seconds=TEMPORAL_SEGMENT_SECONDS)
     now = timezone.now()
-    last_15_minutes = now - delta
-    last_temporal_segment = get_temporal_segment(last_15_minutes)
-    return get_temporal_range(last_temporal_segment, reference_datetime=last_15_minutes)
+    previous_window = now - delta
+    last_temporal_segment = get_temporal_segment(previous_window)
+    return get_temporal_range(last_temporal_segment, reference_datetime=previous_window)
 
 
 def get_last_temporal_range():
     """
-    Get the last temporal range (15-minute window).
+    Get the last finished temporal range (TEMPORAL_SEGMENT_MINUTES window).
     Cached for 1 minute to avoid redundant calculations.
     """
     # Use current minute as cache key - cache expires every minute
@@ -80,11 +77,11 @@ def get_last_temporal_range():
 
 
 def get_last_temporal_segment():
-    delta = timedelta(minutes=15)
+    delta = timedelta(seconds=TEMPORAL_SEGMENT_SECONDS)
     now = timezone.now()
-    last_15_minutes = now - delta
-    last_temporal_segment = get_temporal_segment(last_15_minutes)
-    return last_15_minutes.date(), last_temporal_segment
+    previous_window = now - delta
+    last_temporal_segment = get_temporal_segment(previous_window)
+    return previous_window.date(), last_temporal_segment
 
 
 def get_day_type(dt: datetime):
@@ -97,6 +94,19 @@ def get_day_type(dt: datetime):
     day_type = "L" if weekday < 5 else "S" if weekday == 5 else "D"
 
     return day_type
+
+
+def get_day_bounds(dt: datetime):
+    """[start, end) of dt's day; a range filter can use indexes, timestamp__date cannot."""
+    start = timezone.localtime(dt).replace(hour=0, minute=0, second=0, microsecond=0)
+    return start, start + timedelta(days=1)
+
+
+def get_month_bounds(year: int, month: int):
+    """[start, end) of a month in UTC."""
+    start = datetime(year, month, 1, tzinfo=pytz.utc)
+    end = datetime(year + month // 12, month % 12 + 1, 1, tzinfo=pytz.utc)
+    return start, end
 
 
 def get_previous_month():
