@@ -1,3 +1,4 @@
+import os
 import time
 from typing import Dict, List
 
@@ -7,6 +8,14 @@ import requests
 from django.core.cache import cache
 from jinja2 import Template
 from rest_api.models import Axles
+
+# Overpass rejects the library's default User-Agent (406); send our own.
+OVERPASS_ENDPOINT = os.getenv(
+    "OVERPASS_ENDPOINT", "https://overpass-api.de/api/interpreter"
+)
+OVERPASS_USER_AGENT = os.getenv(
+    "OVERPASS_USER_AGENT", "uoct-backend/1.0 (academic transit project)"
+)
 
 # Overpass API template for querying OSM data
 OVERPASS_TEMPLATE = Template(
@@ -284,7 +293,11 @@ class OSMDownloader:
         """
         for attempt in range(retries):
             try:
-                api = overpass.API(timeout=180 * (attempt + 1))
+                api = overpass.API(
+                    endpoint=OVERPASS_ENDPOINT,
+                    headers={"User-Agent": OVERPASS_USER_AGENT},
+                    timeout=180 * (attempt + 1),
+                )
                 # api.get adds [out:json]; at the beginning and "out geom;" at the end
                 response = api.get(query, verbosity="geom")
                 return geojson.loads(geojson.dumps(response))
