@@ -49,7 +49,8 @@ worker)
   echo "running commands"
   python ./backend/manage.py rqworker default email_sender cronlike &
   python ./backend/manage.py rqworker speed &
-  python ./backend/manage.py custom_rqscheduler
+  # --interval 5: the default polls every 60 s and could delay the speed job up to a minute.
+  python ./backend/manage.py custom_rqscheduler --interval 5
   ;;
 test)
   echo "Running tests"

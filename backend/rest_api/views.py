@@ -45,6 +45,12 @@ from rest_api.serializers import (
     StopSerializer,
     TrafficSignalSerializer,
 )
+from rest_api.util.map_cache import (
+    PENDING_TTL_SECONDS,
+    READY_TTL_SECONDS,
+    map_data_key,
+    speeds_ready,
+)
 from rest_framework import generics, mixins, viewsets
 from rest_framework.filters import OrderingFilter
 from rest_framework.permissions import AllowAny
@@ -80,10 +86,13 @@ class GeoJSONViewSet(generics.GenericAPIView):
         # Returns a GeoJSON with the latest data.
         # This includes the segmented path (SEGMENT_DISTANCE_METERS) with its corresponding velocities
         window_start, _ = get_last_temporal_range()
+        # Right after a window closes its speeds take ~30 s + job time to be stored.
+        # A payload built in that gap has no speeds, so it is cached only briefly.
+        ttl = READY_TTL_SECONDS if speeds_ready(window_start) else PENDING_TTL_SECONDS
         payload = cache.get_or_set(
-            f"rest_api:map_data:{window_start.isoformat()}",
+            map_data_key(window_start),
             lambda: json.dumps(shapes_to_geojson(), cls=DjangoJSONEncoder),
-            60,  # speeds change per window, alert votes can change sooner
+            ttl,
         )
         return HttpResponse(payload, content_type="application/json")
 
